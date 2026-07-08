@@ -51,6 +51,7 @@ model Part {
   createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamp
 
   customer           Customer?  @relation(fields: [customerId], references: [customerId], onDelete: Cascade)
+  attachments        PartAttachment[]
   toolingDetails     ToolingDetail[]
   feasibilityStudies FeasibilityStudy[]
   enquiryLines       EnquiryLine[]
@@ -58,7 +59,22 @@ model Part {
   @@map("parts")
 }
 
-// 3. Tooling Details Model
+// 3. Part Attachments Model
+model PartAttachment {
+  attachmentId Int      @id @default(autoincrement()) @map("attachment_id")
+  partId       Int      @map("part_id")
+  fileName     String   @map("file_name") @db.VarChar(255)
+  filePath     String   @map("file_path") @db.VarChar(500)
+  uploadedBy   String?  @map("uploaded_by") @db.VarChar(100)
+  uploadedAt   DateTime @default(now()) @map("uploaded_at") @db.Timestamp
+  remarks      String?  @db.Text
+
+  part         Part     @relation(fields: [partId], references: [partId], onDelete: Cascade)
+
+  @@map("part_attachments")
+}
+
+// 4. Tooling Details Model
 enum DieDrawingAvailable {
   Customer_Provides @map("Customer Provides")
   To_Be_Developed   @map("To Be Developed")
