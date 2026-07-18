@@ -233,6 +233,7 @@ model Quotation {
   sentOn           DateTime?        @map("sent_on") @db.Date
   customerFeedback String?          @map("customer_feedback") @db.Text
   createdAt        DateTime         @default(now()) @map("created_at") @db.Timestamp
+  updatedAt        DateTime         @updatedAt @map("updated_at") @db.Timestamp
 
   enquiry          Enquiry          @relation(fields: [enquiryId], references: [enquiryId], onDelete: Cascade)
 
