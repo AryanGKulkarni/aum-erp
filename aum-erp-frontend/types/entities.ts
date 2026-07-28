@@ -6,7 +6,8 @@ export interface Enquiry {
   receivedBy: string;
   parts: number;
   dieSets: number;
-  status: "Feasibility" | "Quoted" | "Won" | "Lost" | "Pending";
+  status: "Open" | "Feasibility" | "Quoted" | "Won" | "Lost" | "On Hold";
+  quotation: "Generated" | "Generate";
 }
 
 export interface Quotation {
@@ -18,7 +19,7 @@ export interface Quotation {
   grandTotal: number;
   validUntil: string;
   paymentTerms: string;
-  status: "Approved" | "Pending" | "Rejected";
+  status: "Draft" | "Sent" | "Accepted" | "Rejected" | "Revised";
 }
 
 export interface FeasibilityStudy {

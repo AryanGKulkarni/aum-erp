@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import Input from "@mui/joy/Input";
 import SearchIcon from "@mui/icons-material/Search";
 import PageHeading from "@/components/ui/PageHeading";
 import DataTable from "@/components/ui/DataTable";
-import { getEnquiries } from "@/services/api_service";
+import { getEnquiries, generateQuotation } from "@/services/api_service";
 import type { Enquiry } from "@/types/entities";
 import type { Column } from "@/types/table";
 
@@ -17,18 +18,39 @@ const COLUMNS: Column<Enquiry>[] = [
   { key: "parts", header: "Parts", align: "center" },
   { key: "dieSets", header: "Die Sets", align: "center" },
   { key: "status", header: "Status", type: "badge" },
+  { key: "quotation", header: "Quotation", type: "button" },
 ];
 
 export default function EnquiriesPage() {
+  const router = useRouter();
   const [enquiries, setEnquiries] = useState<Enquiry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  const [generatingIds, setGeneratingIds] = useState<Set<string>>(new Set());
+
+  const loadEnquiries = useCallback(() => {
+    return getEnquiries().then(setEnquiries);
+  }, []);
 
   useEffect(() => {
-    getEnquiries()
-      .then(setEnquiries)
-      .finally(() => setIsLoading(false));
-  }, []);
+    loadEnquiries().finally(() => setIsLoading(false));
+  }, [loadEnquiries]);
+
+  async function handleGenerate(row: Enquiry) {
+    setGeneratingIds((prev) => new Set(prev).add(row.id));
+    try {
+      await generateQuotation(row.id);
+      await loadEnquiries();
+    } catch (err) {
+      console.error("Failed to generate quotation:", err);
+    } finally {
+      setGeneratingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(row.id);
+        return next;
+      });
+    }
+  }
 
   const filteredEnquiries = enquiries.filter(
     (enquiry) =>
@@ -42,6 +64,7 @@ export default function EnquiriesPage() {
         title="Enquiries"
         subtitle={`${enquiries.length} total records`}
         actionLabel="New Enquiry"
+        onActionClick={() => router.push("/enquiries/new")}
       />
 
       <Input
@@ -57,7 +80,9 @@ export default function EnquiriesPage() {
         data={filteredEnquiries}
         isLoading={isLoading}
         getRowKey={(row) => row.id}
-        onRowAction={(row) => console.log("Open enquiry:", row.enquiryNo)}
+        onRowAction={(row) => router.push(`/enquiries/${row.id}`)}
+        onCellAction={(row) => handleGenerate(row)}
+        isCellLoading={(row) => generatingIds.has(row.id)}
       />
     </>
   );

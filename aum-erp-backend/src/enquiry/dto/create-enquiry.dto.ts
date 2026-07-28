@@ -25,8 +25,8 @@ export class CreateEnquiryLineDto {
   @ApiPropertyOptional() specialRequirements?: string;
   @ApiPropertyOptional() lineRemarks?: string;
 
-  @ApiPropertyOptional({ type: CreateToolingDetailDto })
-  toolingDetail?: CreateToolingDetailDto;
+  @ApiPropertyOptional({ type: [CreateToolingDetailDto] })
+  toolingDetails?: CreateToolingDetailDto[];
 }
 
 export class CreateEnquiryDto {

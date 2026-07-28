@@ -92,8 +92,9 @@ export class FeasibilityStudyService {
     });
   }
 
-  async findAll() {
+  async findAll(partId?: number) {
     const studies = await this.prisma.feasibilityStudy.findMany({
+      where: partId ? { partId } : undefined,
       include: {
         part: { include: { customer: true } },
         costEstimations: true,
@@ -119,7 +120,10 @@ export class FeasibilityStudyService {
   async findOne(id: number) {
     const study = await this.prisma.feasibilityStudy.findUnique({
       where: { feasibilityId: id },
-      include: { part: true, costEstimations: true },
+      include: {
+        part: { include: { customer: true, attachments: { orderBy: { uploadedAt: 'desc' } } } },
+        costEstimations: true,
+      },
     });
     if (!study) throw new NotFoundException(`Feasibility study #${id} not found`);
     return study;
@@ -160,6 +164,22 @@ export class FeasibilityStudyService {
           where: { partId: study.partId },
           data: { partStatus: verdictToStatus[dto.overallVerdict] },
         });
+      }
+
+      if (dto.costEstimation) {
+        const existing = await tx.costEstimation.findFirst({
+          where: { feasibilityId: id },
+        });
+        if (existing) {
+          await tx.costEstimation.update({
+            where: { costId: existing.costId },
+            data: dto.costEstimation,
+          });
+        } else {
+          await tx.costEstimation.create({
+            data: { feasibilityId: id, ...dto.costEstimation },
+          });
+        }
       }
 
       return tx.feasibilityStudy.findUnique({

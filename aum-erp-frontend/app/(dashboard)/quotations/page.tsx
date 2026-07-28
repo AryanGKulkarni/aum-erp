@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import Input from "@mui/joy/Input";
 import SearchIcon from "@mui/icons-material/Search";
 import PageHeading from "@/components/ui/PageHeading";
@@ -20,6 +21,7 @@ const COLUMNS: Column<Quotation>[] = [
 ];
 
 export default function QuotationsPage() {
+  const router = useRouter();
   const [quotations, setQuotations] = useState<Quotation[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -41,7 +43,6 @@ export default function QuotationsPage() {
       <PageHeading
         title="Quotations"
         subtitle={`${quotations.length} total records`}
-        actionLabel="New Quotation"
       />
 
       <Input
@@ -57,8 +58,7 @@ export default function QuotationsPage() {
         data={filteredQuotations}
         isLoading={isLoading}
         getRowKey={(row) => row.id}
-        onRowAction={(row) => console.log("Edit quotation:", row.quotationId)}
-        rowActionLabel="Edit →"
+        onRowAction={(row) => router.push(`/quotations/${row.id}`)}
       />
     </>
   );

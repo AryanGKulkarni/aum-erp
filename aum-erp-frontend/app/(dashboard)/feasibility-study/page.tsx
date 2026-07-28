@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import Input from "@mui/joy/Input";
 import SearchIcon from "@mui/icons-material/Search";
 import PageHeading from "@/components/ui/PageHeading";
@@ -21,6 +22,7 @@ const COLUMNS: Column<FeasibilityStudy>[] = [
 ];
 
 export default function FeasibilityStudyPage() {
+  const router = useRouter();
   const [studies, setStudies] = useState<FeasibilityStudy[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -44,6 +46,7 @@ export default function FeasibilityStudyPage() {
         title="Feasibility Studies"
         subtitle={`${studies.length} total records`}
         actionLabel="New Study"
+        onActionClick={() => router.push("/feasibility-study/new")}
       />
 
       <Input
@@ -59,7 +62,7 @@ export default function FeasibilityStudyPage() {
         data={filteredStudies}
         isLoading={isLoading}
         getRowKey={(row) => row.id}
-        onRowAction={(row) => console.log("Open study:", row.studyId)}
+        onRowAction={(row) => router.push(`/feasibility-study/${row.id}`)}
       />
     </>
   );

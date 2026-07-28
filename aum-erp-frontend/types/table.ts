@@ -1,4 +1,4 @@
-export type ColumnType = "text" | "badge" | "link";
+export type ColumnType = "text" | "badge" | "link" | "button";
 
 export interface Column<T> {
   key: keyof T;
@@ -15,4 +15,6 @@ export interface DataTableProps<T> {
   getRowKey: (row: T) => string;
   onRowAction?: (row: T) => void;
   rowActionLabel?: string;
+  onCellAction?: (row: T, key: keyof T) => void;
+  isCellLoading?: (row: T, key: keyof T) => boolean;
 }

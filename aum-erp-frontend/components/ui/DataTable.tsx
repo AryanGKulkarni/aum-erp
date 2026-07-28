@@ -4,11 +4,12 @@ import Table from "@mui/joy/Table";
 import Box from "@mui/joy/Box";
 import Typography from "@mui/joy/Typography";
 import Link from "@mui/joy/Link";
+import Button from "@mui/joy/Button";
 import CircularProgress from "@mui/joy/CircularProgress";
 import StatusBadge from "./StatusBadge";
 import type { DataTableProps } from "@/types/table";
 
-export default function DataTable<T extends Record<string, unknown>>({
+export default function DataTable<T extends object>({
   columns,
   data,
   isLoading = false,
@@ -16,6 +17,8 @@ export default function DataTable<T extends Record<string, unknown>>({
   getRowKey,
   onRowAction,
   rowActionLabel = "Open →",
+  onCellAction,
+  isCellLoading,
 }: DataTableProps<T>) {
   if (isLoading) {
     return (
@@ -62,17 +65,39 @@ export default function DataTable<T extends Record<string, unknown>>({
         {data.map((row) => (
           <tr key={getRowKey(row)}>
             {columns.map((col) => {
-              const value = row[col.key];
+              const value = (row as Record<keyof T, unknown>)[col.key];
+              const strValue = String(value);
+
+              let cell: React.ReactNode;
+              if (col.type === "button") {
+                if (strValue !== "Generate") {
+                  cell = <StatusBadge status={strValue} />;
+                } else if (isCellLoading?.(row, col.key)) {
+                  cell = <CircularProgress size="sm" />;
+                } else {
+                  cell = (
+                    <Button
+                      size="sm"
+                      variant="solid"
+                      color="primary"
+                      onClick={() => onCellAction?.(row, col.key)}
+                    >
+                      Generate
+                    </Button>
+                  );
+                }
+              } else if (col.type === "badge") {
+                cell = <StatusBadge status={strValue} />;
+              } else {
+                cell = strValue;
+              }
+
               return (
                 <td
                   key={String(col.key)}
                   style={{ textAlign: col.align ?? "center" }}
                 >
-                  {col.type === "badge" ? (
-                    <StatusBadge status={String(value)} />
-                  ) : (
-                    String(value)
-                  )}
+                  {cell}
                 </td>
               );
             })}

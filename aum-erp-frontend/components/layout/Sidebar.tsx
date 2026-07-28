@@ -29,7 +29,7 @@ export default function Sidebar() {
           </Box>
           <Box>
             <Typography level="title-sm" sx={{ color: "neutral.100" }}>
-              NexusERP
+              AUM ERP
             </Typography>
             <Typography level="body-xs" sx={{ color: "neutral.500" }}>
               v1.0.0

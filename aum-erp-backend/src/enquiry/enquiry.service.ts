@@ -51,15 +51,15 @@ export class EnquiryService {
           },
         });
 
-        if (line.toolingDetail) {
+        for (const td of line.toolingDetails ?? []) {
           await tx.toolingDetail.create({
             data: {
               partId: line.partId,
-              dieDrawingAvailable: line.toolingDetail.dieDrawingAvailable,
-              estimatedDieCost: line.toolingDetail.estimatedDieCost,
-              dieAmortisationQty: line.toolingDetail.dieAmortisationQty,
-              dieAmortisationPerPc: line.toolingDetail.dieAmortisationPerPc,
-              dieRemarks: line.toolingDetail.dieRemarks,
+              dieDrawingAvailable: td.dieDrawingAvailable,
+              estimatedDieCost: td.estimatedDieCost,
+              dieAmortisationQty: td.dieAmortisationQty,
+              dieAmortisationPerPc: td.dieAmortisationPerPc,
+              dieRemarks: td.dieRemarks,
             },
           });
         }
@@ -176,18 +176,20 @@ export class EnquiryService {
             },
           });
 
-          if (line.toolingDetail) {
+          if (line.toolingDetails?.length) {
             await tx.toolingDetail.deleteMany({ where: { partId: line.partId } });
-            await tx.toolingDetail.create({
-              data: {
-                partId: line.partId,
-                dieDrawingAvailable: line.toolingDetail.dieDrawingAvailable,
-                estimatedDieCost: line.toolingDetail.estimatedDieCost,
-                dieAmortisationQty: line.toolingDetail.dieAmortisationQty,
-                dieAmortisationPerPc: line.toolingDetail.dieAmortisationPerPc,
-                dieRemarks: line.toolingDetail.dieRemarks,
-              },
-            });
+            for (const td of line.toolingDetails) {
+              await tx.toolingDetail.create({
+                data: {
+                  partId: line.partId,
+                  dieDrawingAvailable: td.dieDrawingAvailable,
+                  estimatedDieCost: td.estimatedDieCost,
+                  dieAmortisationQty: td.dieAmortisationQty,
+                  dieAmortisationPerPc: td.dieAmortisationPerPc,
+                  dieRemarks: td.dieRemarks,
+                },
+              });
+            }
           }
         }
       }

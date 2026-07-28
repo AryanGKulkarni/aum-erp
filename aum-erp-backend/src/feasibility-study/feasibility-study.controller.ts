@@ -11,6 +11,7 @@ import {
   ParseIntPipe,
   Res,
   StreamableFile,
+  Query,
 } from '@nestjs/common';
 import { Response } from 'express';
 import * as mime from 'mime-types';
@@ -79,8 +80,8 @@ export class FeasibilityStudyController {
   }
 
   @Get()
-  findAll() {
-    return this.feasibilityStudyService.findAll();
+  findAll(@Query('partId') partId?: string) {
+    return this.feasibilityStudyService.findAll(partId ? parseInt(partId, 10) : undefined);
   }
 
   @Get(':id')
@@ -102,6 +103,31 @@ export class FeasibilityStudyController {
   async getAttachments(@Param('id', ParseIntPipe) id: number) {
     const study = await this.feasibilityStudyService.findOne(id);
     return this.partAttachmentService.findByPart(study.partId);
+  }
+
+  @Post(':id/attachments')
+  @UseInterceptors(
+    FilesInterceptor('attachments', 20, {
+      storage: diskStorage({
+        destination: './uploads/attachments',
+        filename: (_req, file, cb) => {
+          cb(null, `${uuidv4()}${extname(file.originalname)}`);
+        },
+      }),
+    }),
+  )
+  async addAttachments(
+    @Param('id', ParseIntPipe) id: number,
+    @Body('uploadedBy') uploadedBy: string,
+    @UploadedFiles() files: Express.Multer.File[],
+  ) {
+    const study = await this.feasibilityStudyService.findOne(id);
+    await Promise.all(
+      files.map((file) =>
+        this.partAttachmentService.create(study!.partId, file, uploadedBy),
+      ),
+    );
+    return this.partAttachmentService.findByPart(study!.partId);
   }
 
   @Get(':id/attachments/:attachmentId/view')
