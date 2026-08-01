@@ -6,9 +6,9 @@ import { UpdateQuotationDto } from './dto/update-quotation.dto';
 export class QuotationController {
   constructor(private readonly quotationService: QuotationService) {}
 
-  @Post('generate/:enquiryId')
-  generate(@Param('enquiryId', ParseIntPipe) enquiryId: number) {
-    return this.quotationService.generateForEnquiry(enquiryId);
+  @Post('generate/:studyId')
+  generate(@Param('studyId', ParseIntPipe) studyId: number) {
+    return this.quotationService.generateFromStudy(studyId);
   }
 
   @Get()

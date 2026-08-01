@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../services/email.service';
@@ -18,7 +18,7 @@ export class AuthService {
     if (!user) throw new NotFoundException('No account found with this email');
 
     const token = this.jwtService.sign(
-      { sub: user.id, email: user.email },
+      { sub: user.userId, email: user.email },
       { expiresIn: '10m' },
     );
 
@@ -35,36 +35,21 @@ export class AuthService {
     });
   }
 
-  async validateUser(details: {
-    email: string;
-    firstName: string;
-    lastName: string;
-    picture?: string;
-  }) {
-    // Find existing user
-    let user = await this.prisma.user.findUnique({
-      where: { email: details.email },
-    });
-
-    // If user does not exist, create a new one
+  async validateUser(details: { email: string; firstName: string; lastName: string }) {
+    // Users are pre-provisioned by an admin with a role — Google sign-in only
+    // authenticates an existing account, it never creates one.
+    const user = await this.prisma.user.findUnique({ where: { email: details.email } });
     if (!user) {
-      user = await this.prisma.user.create({
-        data: {
-          email: details.email,
-          firstName: details.firstName,
-          lastName: details.lastName,
-          picture: details.picture,
-        },
-      });
-    } else {
-      // If user exists, update their profile picture and name in case it changed
-      user = await this.prisma.user.update({
+      throw new UnauthorizedException(
+        'No account found for this email. Ask an administrator to add you first.',
+      );
+    }
+
+    const fullName = `${details.firstName} ${details.lastName}`.trim();
+    if (fullName && fullName !== user.fullName) {
+      return this.prisma.user.update({
         where: { email: details.email },
-        data: {
-          firstName: details.firstName,
-          lastName: details.lastName,
-          picture: details.picture,
-        },
+        data: { fullName },
       });
     }
 

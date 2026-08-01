@@ -11,12 +11,13 @@ import type { Quotation } from "@/types/entities";
 import type { Column } from "@/types/table";
 
 const COLUMNS: Column<Quotation>[] = [
-  { key: "quotationId", header: "Quotation ID" },
-  { key: "enquiryRef", header: "Enquiry Ref" },
-  { key: "client", header: "Client" },
-  { key: "grandTotal", header: "Grand Total", align: "right" },
+  { key: "quotationNo", header: "Quotation No." },
+  { key: "enquiryRef", header: "Enquiry Ref." },
+  { key: "customer", header: "Customer" },
+  { key: "date", header: "Date" },
   { key: "validUntil", header: "Valid Until" },
-  { key: "paymentTerms", header: "Payment Terms" },
+  { key: "monthlyValue", header: "Monthly Value", align: "right" },
+  { key: "parts", header: "Parts", align: "center" },
   { key: "status", header: "Status", type: "badge" },
 ];
 
@@ -34,19 +35,20 @@ export default function QuotationsPage() {
 
   const filteredQuotations = quotations.filter(
     (q) =>
-      q.quotationId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      q.client.toLowerCase().includes(searchTerm.toLowerCase()),
+      q.quotationNo.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      q.customer.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      q.enquiryRef.toLowerCase().includes(searchTerm.toLowerCase()),
   );
 
   return (
     <>
       <PageHeading
         title="Quotations"
-        subtitle={`${quotations.length} total records`}
+        subtitle={`${quotations.length} total · auto-generated from feasibility study`}
       />
 
       <Input
-        placeholder="Search by client or ID..."
+        placeholder="Search by quotation number, customer, or enquiry..."
         startDecorator={<SearchIcon />}
         value={searchTerm}
         onChange={(e) => setSearchTerm(e.target.value)}
@@ -59,6 +61,7 @@ export default function QuotationsPage() {
         isLoading={isLoading}
         getRowKey={(row) => row.id}
         onRowAction={(row) => router.push(`/quotations/${row.id}`)}
+        rowActionLabel="View →"
       />
     </>
   );

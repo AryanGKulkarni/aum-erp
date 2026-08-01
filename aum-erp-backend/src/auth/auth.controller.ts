@@ -33,11 +33,10 @@ export class AuthController {
       example: {
         message: 'User logged in successfully via Google!',
         user: {
-          id: 1,
+          userId: 1,
           email: 'user@example.com',
-          firstName: 'John',
-          lastName: 'Doe',
-          picture: 'https://...',
+          fullName: 'John Doe',
+          role: 'Sales',
         },
       },
     },

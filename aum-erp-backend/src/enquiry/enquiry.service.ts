@@ -1,8 +1,21 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateEnquiryDto } from './dto/create-enquiry.dto';
-import { UpdateEnquiryDto } from './dto/update-enquiry.dto';
-import { EnquiryStatus } from '@prisma/client';
+import { CreateEnquiryDto, CreateEnquiryLineDto } from './dto/create-enquiry.dto';
+import { UpdateEnquiryDto, UpdateEnquiryLineDto } from './dto/update-enquiry.dto';
+import { EnquiryStatus, Prisma } from '@prisma/client';
+
+const enquiryInclude = {
+  customer: true,
+  enquiryLines: {
+    include: {
+      part: true,
+      suggestedMachine: true,
+      attachments: { orderBy: { uploadedAt: 'desc' } },
+    },
+    orderBy: { lineNumber: 'asc' },
+  },
+  feasibilityStudy: true,
+} satisfies Prisma.EnquiryInclude;
 
 @Injectable()
 export class EnquiryService {
@@ -13,6 +26,28 @@ export class EnquiryService {
     const count = await this.prisma.enquiry.count();
     const sequence = String(count + 1).padStart(4, '0');
     return `ENQ-${year}-${sequence}`;
+  }
+
+  private async resolvePartId(
+    tx: Prisma.TransactionClient,
+    enquiryCustomerId: number,
+    line: CreateEnquiryLineDto,
+  ): Promise<number> {
+    if (line.partId) return line.partId;
+
+    if (!line.part) {
+      throw new BadRequestException('Each line requires either partId or part details');
+    }
+
+    const newPart = await tx.part.create({
+      data: {
+        customerId: line.part.customerId ?? enquiryCustomerId,
+        partName: line.part.partName,
+        partDrawingNumber: line.part.partDrawingNumber,
+        materialGrade: line.part.materialGrade,
+      },
+    });
+    return newPart.partId;
   }
 
   async create(dto: CreateEnquiryDto) {
@@ -29,53 +64,35 @@ export class EnquiryService {
           customerId: dto.customerId,
           enquiryDate: new Date(dto.enquiryDate),
           receivedBy: dto.receivedBy,
-          status: (dto.status as EnquiryStatus) ?? EnquiryStatus.Open,
+          createdBy: dto.createdBy,
+          status: dto.status as EnquiryStatus | undefined,
           lostReason: dto.lostReason,
           remarks: dto.remarks,
         },
       });
 
-      for (const line of dto.lines) {
+      for (const [index, line] of dto.lines.entries()) {
+        const partId = await this.resolvePartId(tx, dto.customerId, line);
+
         await tx.enquiryLine.create({
           data: {
             enquiryId: enquiry.enquiryId,
-            partId: line.partId,
-            feasibilityId: line.feasibilityId,
+            lineNumber: line.lineNumber ?? index + 1,
+            partId,
+            supplyType: line.supplyType,
             qtyPerMonth: line.qtyPerMonth,
-            qtyPerYear: line.qtyPerYear,
-            suggestedMachine: line.suggestedMachine,
-            heatTreatmentRequired: line.heatTreatmentRequired ?? false,
-            heatTreatmentSpec: line.heatTreatmentSpec,
+            suggestedMachineId: line.suggestedMachineId,
+            deliveryState: line.deliveryState,
             specialRequirements: line.specialRequirements,
             lineRemarks: line.lineRemarks,
+            lineStatus: line.lineStatus,
           },
         });
-
-        for (const td of line.toolingDetails ?? []) {
-          await tx.toolingDetail.create({
-            data: {
-              partId: line.partId,
-              dieDrawingAvailable: td.dieDrawingAvailable,
-              estimatedDieCost: td.estimatedDieCost,
-              dieAmortisationQty: td.dieAmortisationQty,
-              dieAmortisationPerPc: td.dieAmortisationPerPc,
-              dieRemarks: td.dieRemarks,
-            },
-          });
-        }
       }
 
       return tx.enquiry.findUnique({
         where: { enquiryId: enquiry.enquiryId },
-        include: {
-          customer: true,
-          enquiryLines: {
-            include: {
-              part: { include: { toolingDetails: true } },
-              feasibilityStudy: true,
-            },
-          },
-        },
+        include: enquiryInclude,
       });
     });
   }
@@ -84,11 +101,8 @@ export class EnquiryService {
     const enquiries = await this.prisma.enquiry.findMany({
       include: {
         customer: true,
-        enquiryLines: {
-          include: {
-            part: { include: { toolingDetails: true } },
-          },
-        },
+        receivedByUser: true,
+        enquiryLines: true,
         quotations: {
           orderBy: { updatedAt: 'desc' },
           take: 1,
@@ -100,24 +114,16 @@ export class EnquiryService {
     return enquiries.map((e) => {
       const latestQuotation = e.quotations[0] ?? null;
       const quotation =
-        latestQuotation && latestQuotation.updatedAt > e.updatedAt
-          ? 'Generated'
-          : 'Generate';
-
-      const dieSets = e.enquiryLines.reduce(
-        (acc, line) => acc + line.part.toolingDetails.length,
-        0,
-      );
+        latestQuotation && latestQuotation.updatedAt > e.updatedAt ? 'Generated' : 'Generate';
 
       return {
         enquiryId: e.enquiryId,
         enquiryNumber: e.enquiryNumber,
         customer: e.customer.companyName,
         enquiryDate: e.enquiryDate,
-        receivedBy: e.receivedBy,
+        receivedBy: e.receivedByUser?.fullName ?? null,
         status: e.status,
         parts: e.enquiryLines.length,
-        dieSets,
         quotation,
       };
     });
@@ -127,13 +133,7 @@ export class EnquiryService {
     const enquiry = await this.prisma.enquiry.findUnique({
       where: { enquiryId: id },
       include: {
-        customer: true,
-        enquiryLines: {
-          include: {
-            part: { include: { toolingDetails: true } },
-            feasibilityStudy: true,
-          },
-        },
+        ...enquiryInclude,
         timelines: true,
       },
     });
@@ -141,8 +141,71 @@ export class EnquiryService {
     return enquiry;
   }
 
+  async findLine(lineId: number) {
+    const line = await this.prisma.enquiryLine.findUnique({ where: { lineId } });
+    if (!line) throw new NotFoundException(`Enquiry line #${lineId} not found`);
+    return line;
+  }
+
+  private async syncLines(
+    tx: Prisma.TransactionClient,
+    enquiryId: number,
+    customerId: number,
+    lines: UpdateEnquiryLineDto[],
+  ) {
+    const existing = await tx.enquiryLine.findMany({ where: { enquiryId } });
+    const keepLineIds = new Set(lines.filter((l) => l.lineId).map((l) => l.lineId));
+
+    const toRemove = existing.filter((l) => !keepLineIds.has(l.lineId));
+    if (toRemove.length) {
+      await tx.enquiryLine.deleteMany({
+        where: { lineId: { in: toRemove.map((l) => l.lineId) } },
+      });
+    }
+
+    for (const [index, line] of lines.entries()) {
+      const lineNumber = line.lineNumber ?? index + 1;
+
+      if (line.lineId) {
+        await tx.enquiryLine.update({
+          where: { lineId: line.lineId },
+          data: {
+            lineNumber,
+            partId: line.partId,
+            supplyType: line.supplyType,
+            qtyPerMonth: line.qtyPerMonth,
+            suggestedMachineId: line.suggestedMachineId,
+            deliveryState: line.deliveryState,
+            specialRequirements: line.specialRequirements,
+            lineRemarks: line.lineRemarks,
+            lineStatus: line.lineStatus,
+          },
+        });
+      } else {
+        if (!line.supplyType) {
+          throw new BadRequestException('supplyType is required for a new enquiry line');
+        }
+        const partId = await this.resolvePartId(tx, customerId, line as CreateEnquiryLineDto);
+        await tx.enquiryLine.create({
+          data: {
+            enquiryId,
+            lineNumber,
+            partId,
+            supplyType: line.supplyType,
+            qtyPerMonth: line.qtyPerMonth,
+            suggestedMachineId: line.suggestedMachineId,
+            deliveryState: line.deliveryState,
+            specialRequirements: line.specialRequirements,
+            lineRemarks: line.lineRemarks,
+            lineStatus: line.lineStatus,
+          },
+        });
+      }
+    }
+  }
+
   async update(id: number, dto: UpdateEnquiryDto) {
-    await this.findOne(id);
+    const current = await this.findOne(id);
 
     return this.prisma.$transaction(async (tx) => {
       await tx.enquiry.update({
@@ -151,60 +214,20 @@ export class EnquiryService {
           customerId: dto.customerId,
           enquiryDate: dto.enquiryDate ? new Date(dto.enquiryDate) : undefined,
           receivedBy: dto.receivedBy,
+          createdBy: dto.createdBy,
           status: dto.status as EnquiryStatus | undefined,
           lostReason: dto.lostReason,
           remarks: dto.remarks,
         },
       });
 
-      if (dto.lines && dto.lines.length > 0) {
-        await tx.enquiryLine.deleteMany({ where: { enquiryId: id } });
-
-        for (const line of dto.lines) {
-          await tx.enquiryLine.create({
-            data: {
-              enquiryId: id,
-              partId: line.partId,
-              feasibilityId: line.feasibilityId,
-              qtyPerMonth: line.qtyPerMonth,
-              qtyPerYear: line.qtyPerYear,
-              suggestedMachine: line.suggestedMachine,
-              heatTreatmentRequired: line.heatTreatmentRequired ?? false,
-              heatTreatmentSpec: line.heatTreatmentSpec,
-              specialRequirements: line.specialRequirements,
-              lineRemarks: line.lineRemarks,
-            },
-          });
-
-          if (line.toolingDetails?.length) {
-            await tx.toolingDetail.deleteMany({ where: { partId: line.partId } });
-            for (const td of line.toolingDetails) {
-              await tx.toolingDetail.create({
-                data: {
-                  partId: line.partId,
-                  dieDrawingAvailable: td.dieDrawingAvailable,
-                  estimatedDieCost: td.estimatedDieCost,
-                  dieAmortisationQty: td.dieAmortisationQty,
-                  dieAmortisationPerPc: td.dieAmortisationPerPc,
-                  dieRemarks: td.dieRemarks,
-                },
-              });
-            }
-          }
-        }
+      if (dto.lines) {
+        await this.syncLines(tx, id, dto.customerId ?? current.customerId, dto.lines);
       }
 
       return tx.enquiry.findUnique({
         where: { enquiryId: id },
-        include: {
-          customer: true,
-          enquiryLines: {
-            include: {
-              part: { include: { toolingDetails: true } },
-              feasibilityStudy: true,
-            },
-          },
-        },
+        include: enquiryInclude,
       });
     });
   }

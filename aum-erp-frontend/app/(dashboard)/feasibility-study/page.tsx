@@ -11,14 +11,12 @@ import type { FeasibilityStudy } from "@/types/entities";
 import type { Column } from "@/types/table";
 
 const COLUMNS: Column<FeasibilityStudy>[] = [
-  { key: "studyId", header: "Study ID" },
-  { key: "partName", header: "Part" },
+  { key: "studyCode", header: "Study ID" },
+  { key: "enquiryNo", header: "Enquiry No." },
   { key: "customer", header: "Customer" },
-  { key: "machine", header: "Machine" },
-  { key: "materialUtilPercent", header: "Mat. Util.", align: "right" },
-  { key: "quotedPrice", header: "Quoted Price", align: "right" },
-  { key: "capacity", header: "Capacity", type: "badge" },
-  { key: "verdict", header: "Verdict", type: "badge" },
+  { key: "parts", header: "Parts", align: "center" },
+  { key: "assessmentDate", header: "Assessment Date" },
+  { key: "status", header: "Status", type: "badge" },
 ];
 
 export default function FeasibilityStudyPage() {
@@ -35,9 +33,9 @@ export default function FeasibilityStudyPage() {
 
   const filteredStudies = studies.filter(
     (s) =>
-      s.partName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      s.enquiryNo.toLowerCase().includes(searchTerm.toLowerCase()) ||
       s.customer.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      s.studyId.toLowerCase().includes(searchTerm.toLowerCase()),
+      s.studyCode.toLowerCase().includes(searchTerm.toLowerCase()),
   );
 
   return (
@@ -50,7 +48,7 @@ export default function FeasibilityStudyPage() {
       />
 
       <Input
-        placeholder="Search by part, customer, or study ID..."
+        placeholder="Search by enquiry number, customer, or study ID..."
         startDecorator={<SearchIcon />}
         value={searchTerm}
         onChange={(e) => setSearchTerm(e.target.value)}

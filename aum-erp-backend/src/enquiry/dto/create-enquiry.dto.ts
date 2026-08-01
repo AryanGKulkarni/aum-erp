@@ -1,32 +1,36 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
-export class CreateToolingDetailDto {
-  @ApiPropertyOptional({ enum: ['Customer_Provides', 'To_Be_Developed', 'Existing_Die'] })
-  dieDrawingAvailable?: 'Customer_Provides' | 'To_Be_Developed' | 'Existing_Die';
-
-  @ApiPropertyOptional() estimatedDieCost?: number;
-  @ApiPropertyOptional() dieAmortisationQty?: number;
-  @ApiPropertyOptional() dieAmortisationPerPc?: number;
-  @ApiPropertyOptional() dieRemarks?: string;
+export class CreateEnquiryLinePartDto {
+  // Defaults to the enquiry's customerId if omitted
+  @ApiPropertyOptional() customerId?: number;
+  @ApiProperty() partName!: string;
+  @ApiPropertyOptional() partDrawingNumber?: string;
+  @ApiPropertyOptional() materialGrade?: string;
 }
 
 export class CreateEnquiryLineDto {
-  @ApiProperty() partId!: number;
+  // Auto-assigned from the line's position in the array if omitted
+  @ApiPropertyOptional() lineNumber?: number;
 
-  @ApiPropertyOptional() feasibilityId?: number;
+  // Provide either partId (existing part) or part (new part details)
+  @ApiPropertyOptional() partId?: number;
+  @ApiPropertyOptional({ type: CreateEnquiryLinePartDto }) part?: CreateEnquiryLinePartDto;
+
+  @ApiProperty({ enum: ['With_Material', 'Labour'] })
+  supplyType!: 'With_Material' | 'Labour';
+
   @ApiPropertyOptional() qtyPerMonth?: number;
-  @ApiPropertyOptional() qtyPerYear?: number;
 
-  @ApiPropertyOptional({ enum: ['Press_1000T', 'Belt_Hammer_075T', 'TBD'] })
-  suggestedMachine?: 'Press_1000T' | 'Belt_Hammer_075T' | 'TBD';
+  @ApiPropertyOptional() suggestedMachineId?: number;
 
-  @ApiPropertyOptional() heatTreatmentRequired?: boolean;
-  @ApiPropertyOptional() heatTreatmentSpec?: string;
+  @ApiPropertyOptional({ enum: ['As_Forged', 'Machined'] })
+  deliveryState?: 'As_Forged' | 'Machined';
+
   @ApiPropertyOptional() specialRequirements?: string;
   @ApiPropertyOptional() lineRemarks?: string;
 
-  @ApiPropertyOptional({ type: [CreateToolingDetailDto] })
-  toolingDetails?: CreateToolingDetailDto[];
+  @ApiPropertyOptional({ enum: ['Pending_Feasibility', 'Assessed', 'Quoted', 'Dropped'] })
+  lineStatus?: 'Pending_Feasibility' | 'Assessed' | 'Quoted' | 'Dropped';
 }
 
 export class CreateEnquiryDto {
@@ -36,10 +40,13 @@ export class CreateEnquiryDto {
   @ApiProperty() customerId!: number;
   @ApiProperty() enquiryDate!: string;
 
-  @ApiPropertyOptional() receivedBy?: string;
+  @ApiPropertyOptional() receivedBy?: number;
+  @ApiPropertyOptional() createdBy?: number;
 
-  @ApiPropertyOptional({ enum: ['Open', 'Feasibility', 'Quoted', 'Won', 'Lost', 'On_Hold'] })
-  status?: 'Open' | 'Feasibility' | 'Quoted' | 'Won' | 'Lost' | 'On_Hold';
+  @ApiPropertyOptional({
+    enum: ['Draft', 'Open', 'Under_Feasibility', 'Quoted', 'Won', 'Lost', 'On_Hold'],
+  })
+  status?: 'Draft' | 'Open' | 'Under_Feasibility' | 'Quoted' | 'Won' | 'Lost' | 'On_Hold';
 
   @ApiPropertyOptional() lostReason?: string;
   @ApiPropertyOptional() remarks?: string;

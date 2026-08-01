@@ -5,32 +5,29 @@ export interface Enquiry {
   date: string;
   receivedBy: string;
   parts: number;
-  dieSets: number;
-  status: "Open" | "Feasibility" | "Quoted" | "Won" | "Lost" | "On Hold";
+  status: "Draft" | "Open" | "Under Feasibility" | "Quoted" | "Won" | "Lost" | "On Hold";
   quotation: "Generated" | "Generate";
 }
 
 export interface Quotation {
   id: string;
-  quotationId: string;
+  quotationNo: string;
   enquiryRef: string;
-  client: string;
-  contactPerson: string;
-  grandTotal: number;
+  customer: string;
+  date: string;
   validUntil: string;
-  paymentTerms: string;
+  monthlyValue: string;
+  parts: number;
   status: "Draft" | "Sent" | "Accepted" | "Rejected" | "Revised";
 }
 
 export interface FeasibilityStudy {
   id: string;
-  studyId: string;
-  partName: string;
-  partCode: string;
+  enquiryId: string;
+  studyCode: string;
+  enquiryNo: string;
   customer: string;
-  machine: string;
-  materialUtilPercent: number;
-  quotedPrice: number;
-  capacity: "OK" | "Tight" | "Exceeds";
-  verdict: "Approved" | "Conditional" | "Rejected";
+  status: "Draft" | "Submitted for Review" | "Reviewed" | "Quoted";
+  parts: number;
+  assessmentDate: string;
 }

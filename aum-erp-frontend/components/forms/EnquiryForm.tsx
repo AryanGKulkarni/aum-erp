@@ -1,84 +1,85 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Box from "@mui/joy/Box";
 import Typography from "@mui/joy/Typography";
 import Button from "@mui/joy/Button";
+import IconButton from "@mui/joy/IconButton";
 import Input from "@mui/joy/Input";
 import Textarea from "@mui/joy/Textarea";
 import Select from "@mui/joy/Select";
 import Option from "@mui/joy/Option";
-import Divider from "@mui/joy/Divider";
 import Chip from "@mui/joy/Chip";
-import Checkbox from "@mui/joy/Checkbox";
 import CircularProgress from "@mui/joy/CircularProgress";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import AddIcon from "@mui/icons-material/Add";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
-import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
 import DeleteOutlinedIcon from "@mui/icons-material/DeleteOutlined";
+import AttachFileIcon from "@mui/icons-material/AttachFile";
+import FileUploadOutlinedIcon from "@mui/icons-material/FileUploadOutlined";
+import OpenInNewIcon from "@mui/icons-material/OpenInNew";
+import AddCustomerModal from "./AddCustomerModal";
 import {
   getCustomers,
-  getParts,
-  getPartFeasibilityStudies,
+  getMachines,
+  getUsers,
   createEnquiry,
   updateEnquiry,
+  uploadEnquiryLineAttachments,
+  viewEnquiryAttachment,
+  deleteEnquiryAttachment,
   type CustomerOption,
-  type PartOption,
-  type FeasibilityOption,
+  type MachineOption,
+  type UserOption,
 } from "@/services/api_service";
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
-interface DieSet {
-  _key: string;
-  dieDrawingAvailable: "" | "Customer_Provides" | "To_Be_Developed" | "Existing_Die";
-  estimatedDieCost: string;
-  dieAmortisationQty: string;
-  dieRemarks: string;
+interface ExistingAttachment {
+  attachmentId: number;
+  fileName: string;
+  uploadedAt: string;
 }
 
 interface LineForm {
   _key: string;
   expanded: boolean;
-  partId: string;
-  feasibilityId: string;
-  loadingFS: boolean;
-  feasibilityStudies: FeasibilityOption[];
+  lineId?: number;
+  partName: string;
+  partDrawingNumber: string;
+  materialGrade: string;
+  supplyType: "" | "With_Material" | "Labour";
   qtyPerMonth: string;
-  suggestedMachine: "" | "Press_1000T" | "Belt_Hammer_075T" | "TBD";
-  heatTreatmentRequired: boolean;
-  heatTreatmentSpec: string;
+  suggestedMachineId: string;
+  deliveryState: "" | "As_Forged" | "Machined";
   specialRequirements: string;
   lineRemarks: string;
-  dieSets: DieSet[];
+  files: File[];
+  existingAttachments: ExistingAttachment[];
 }
 
 function newKey() {
   return Math.random().toString(36).slice(2);
 }
 
-function emptyDieSet(): DieSet {
-  return { _key: newKey(), dieDrawingAvailable: "", estimatedDieCost: "", dieAmortisationQty: "", dieRemarks: "" };
-}
-
 function emptyLine(): LineForm {
   return {
-    _key: newKey(), expanded: true, partId: "", feasibilityId: "",
-    loadingFS: false, feasibilityStudies: [], qtyPerMonth: "",
-    suggestedMachine: "", heatTreatmentRequired: false,
-    heatTreatmentSpec: "", specialRequirements: "", lineRemarks: "",
-    dieSets: [emptyDieSet()],
+    _key: newKey(), expanded: true, partName: "", partDrawingNumber: "", materialGrade: "",
+    supplyType: "", qtyPerMonth: "", suggestedMachineId: "", deliveryState: "",
+    specialRequirements: "", lineRemarks: "", files: [], existingAttachments: [],
   };
 }
 
 // ── sub-components ────────────────────────────────────────────────────────────
 
-function SectionBox({ children, sx }: { children: React.ReactNode; sx?: object }) {
+// Between Joy's neutral.50 and neutral.100 steps — no native token sits here.
+const MUTED_GREY = "#F1F1F4";
+
+function SectionBox({ children, sx, muted }: { children: React.ReactNode; sx?: object; muted?: boolean }) {
   return (
-    <Box sx={{ border: "1px solid", borderColor: "neutral.200", borderRadius: "md", backgroundColor: "background.surface", ...sx }}>
+    <Box sx={{ border: "1px solid", borderColor: "neutral.200", borderRadius: "md", backgroundColor: muted ? MUTED_GREY : "background.surface", ...sx }}>
       {children}
     </Box>
   );
@@ -92,16 +93,123 @@ function SectionHeader({ label }: { label: string }) {
   );
 }
 
-function Field({ label, required, children, span }: {
-  label: string; required?: boolean; children: React.ReactNode; span?: number;
+function Field({ label, required, auto, children, span }: {
+  label: string; required?: boolean; auto?: boolean; children: React.ReactNode; span?: number;
 }) {
   return (
     <Box sx={span ? { gridColumn: `span ${span}` } : {}}>
       <Typography level="body-xs" sx={{ mb: 0.5, color: "neutral.600", fontWeight: 500 }}>
         {label}
         {required && <Typography component="span" sx={{ color: "danger.500" }}> *</Typography>}
+        {auto && <Typography component="span" sx={{ color: "primary.600", fontWeight: 600 }}> (auto)</Typography>}
       </Typography>
       {children}
+    </Box>
+  );
+}
+
+function SupplyTypeToggle({ value, onChange }: {
+  value: LineForm["supplyType"];
+  onChange: (v: "With_Material" | "Labour") => void;
+}) {
+  const options: Array<{ v: "With_Material" | "Labour"; label: string }> = [
+    { v: "With_Material", label: "With Material" },
+    { v: "Labour", label: "Labour" },
+  ];
+  return (
+    <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0, border: "1px solid", borderColor: "neutral.300", borderRadius: "sm", overflow: "hidden" }}>
+      {options.map((opt, i) => (
+        <Box
+          key={opt.v}
+          onClick={() => onChange(opt.v)}
+          sx={{
+            textAlign: "center", py: 1, cursor: "pointer", userSelect: "none",
+            borderLeft: i > 0 ? "1px solid" : "none", borderColor: "neutral.300",
+            backgroundColor: value === opt.v ? "primary.100" : MUTED_GREY,
+            color: value === opt.v ? "primary.700" : "neutral.600",
+            fontWeight: value === opt.v ? 600 : 400,
+            fontSize: "0.875rem",
+          }}
+        >
+          {opt.label}
+        </Box>
+      ))}
+    </Box>
+  );
+}
+
+function LineAttachments({ line, onFilesAdded, onRemoveStaged, onDeleteExisting, onOpenExisting }: {
+  line: LineForm;
+  onFilesAdded: (files: File[]) => void;
+  onRemoveStaged: (index: number) => void;
+  onDeleteExisting: (attachmentId: number) => void;
+  onOpenExisting: (attachmentId: number) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [dragOver, setDragOver] = useState(false);
+
+  function handleFiles(fileList: FileList | null) {
+    if (!fileList || fileList.length === 0) return;
+    onFilesAdded(Array.from(fileList));
+  }
+
+  return (
+    <Box>
+      <Typography level="body-xs" sx={{ mb: 0.5, color: "neutral.600", fontWeight: 500 }}>
+        Attach Drawings <Typography component="span" sx={{ color: "neutral.400" }}>(PDF, DXF, DWG, images)</Typography>
+      </Typography>
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        style={{ display: "none" }}
+        onChange={(e) => { handleFiles(e.target.files); if (inputRef.current) inputRef.current.value = ""; }}
+      />
+      <Box
+        onClick={() => inputRef.current?.click()}
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files); }}
+        sx={{
+          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+          py: 2.5, borderRadius: "sm", border: "1px dashed", cursor: "pointer",
+          borderColor: dragOver ? "primary.400" : "neutral.300",
+          color: dragOver ? "primary.500" : "neutral.500",
+          backgroundColor: dragOver ? "primary.50" : "transparent",
+        }}
+      >
+        <FileUploadOutlinedIcon style={{ fontSize: 22, marginBottom: 4 }} />
+        <Typography level="body-sm">
+          Drop files or <Typography component="span" sx={{ color: "primary.500", fontWeight: 600 }}>browse</Typography>
+        </Typography>
+      </Box>
+
+      {(line.existingAttachments.length > 0 || line.files.length > 0) && (
+        <Box sx={{ mt: 1.5, display: "flex", flexDirection: "column", gap: 1 }}>
+          {line.existingAttachments.map((att) => (
+            <Box key={att.attachmentId} sx={{ display: "flex", alignItems: "center", gap: 1, px: 1.5, py: 0.75, borderRadius: "sm", border: "1px solid", borderColor: "neutral.200" }}>
+              <AttachFileIcon style={{ fontSize: 14, color: "var(--joy-palette-neutral-500)" }} />
+              <Typography level="body-xs" sx={{ flex: 1 }} noWrap>{att.fileName}</Typography>
+              <IconButton size="sm" variant="plain" onClick={() => onOpenExisting(att.attachmentId)}>
+                <OpenInNewIcon style={{ fontSize: 14 }} />
+              </IconButton>
+              <IconButton size="sm" variant="plain" color="danger" onClick={() => onDeleteExisting(att.attachmentId)}>
+                <DeleteOutlinedIcon style={{ fontSize: 14 }} />
+              </IconButton>
+            </Box>
+          ))}
+          {line.files.map((file, i) => (
+            <Box key={`${file.name}-${i}`} sx={{ display: "flex", alignItems: "center", gap: 1, px: 1.5, py: 0.75, borderRadius: "sm", border: "1px solid", borderColor: "neutral.200", backgroundColor: "neutral.50" }}>
+              <AttachFileIcon style={{ fontSize: 14, color: "var(--joy-palette-neutral-500)" }} />
+              <Typography level="body-xs" sx={{ flex: 1 }} noWrap>{file.name}</Typography>
+              <Chip size="sm" variant="soft" color="neutral">Pending upload</Chip>
+              <IconButton size="sm" variant="plain" color="danger" onClick={() => onRemoveStaged(i)}>
+                <DeleteOutlinedIcon style={{ fontSize: 14 }} />
+              </IconButton>
+            </Box>
+          ))}
+        </Box>
+      )}
     </Box>
   );
 }
@@ -113,7 +221,7 @@ export interface EnquiryInitialData {
   enquiryNumber: string;
   customerId: number;
   enquiryDate: string;
-  receivedBy: string | null;
+  receivedBy: number | null;
   status: string;
   remarks: string | null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -139,8 +247,8 @@ export default function EnquiryForm({ mode, enquiryId, initialData }: Props) {
       ? new Date(initialData.enquiryDate).toLocaleDateString("en-CA")
       : new Date().toLocaleDateString("en-CA"),
   );
-  const [receivedBy, setReceivedBy] = useState(initialData?.receivedBy ?? "");
-  const [status, setStatus] = useState(initialData?.status ?? "Open");
+  const [receivedBy, setReceivedBy] = useState(initialData?.receivedBy ? String(initialData.receivedBy) : "");
+  const [status, setStatus] = useState(initialData?.status ?? "Draft");
   const [remarks, setRemarks] = useState(initialData?.remarks ?? "");
 
   // lines
@@ -150,90 +258,42 @@ export default function EnquiryForm({ mode, enquiryId, initialData }: Props) {
     return initialData.enquiryLines.map((l: any) => ({
       _key: newKey(),
       expanded: true,
-      partId: String(l.partId),
-      feasibilityId: l.feasibilityId ? String(l.feasibilityId) : "",
-      loadingFS: false,
-      feasibilityStudies: l.feasibilityId && l.feasibilityStudy
-        ? [{ id: String(l.feasibilityStudy.feasibilityId), label: `FS-${l.feasibilityStudy.feasibilityId}${l.feasibilityStudy.overallVerdict ? ` · ${l.feasibilityStudy.overallVerdict}` : ""}`, machine: l.feasibilityStudy.recommendedMachine ?? null }]
-        : [],
+      lineId: l.lineId,
+      partName: l.part?.partName ?? "",
+      partDrawingNumber: l.part?.partDrawingNumber ?? "",
+      materialGrade: l.part?.materialGrade ?? "",
+      supplyType: (l.supplyType ?? "") as LineForm["supplyType"],
       qtyPerMonth: l.qtyPerMonth ? String(l.qtyPerMonth) : "",
-      suggestedMachine: (l.suggestedMachine ?? "") as LineForm["suggestedMachine"],
-      heatTreatmentRequired: l.heatTreatmentRequired ?? false,
-      heatTreatmentSpec: l.heatTreatmentSpec ?? "",
+      suggestedMachineId: l.suggestedMachineId ? String(l.suggestedMachineId) : "",
+      deliveryState: (l.deliveryState ?? "") as LineForm["deliveryState"],
       specialRequirements: l.specialRequirements ?? "",
       lineRemarks: l.lineRemarks ?? "",
-      dieSets: l.part?.toolingDetails?.length
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ? l.part.toolingDetails.map((td: any) => ({
-            _key: newKey(),
-            dieDrawingAvailable: td.dieDrawingAvailable ?? "",
-            estimatedDieCost: td.estimatedDieCost ? String(td.estimatedDieCost) : "",
-            dieAmortisationQty: td.dieAmortisationQty ? String(td.dieAmortisationQty) : "",
-            dieRemarks: td.dieRemarks ?? "",
-          }))
-        : [emptyDieSet()],
+      files: [],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      existingAttachments: (l.attachments ?? []).map((a: any) => ({
+        attachmentId: a.attachmentId,
+        fileName: a.fileName,
+        uploadedAt: a.uploadedAt,
+      })),
     }));
   });
 
   // lookups
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
-  const [parts, setParts] = useState<PartOption[]>([]);
+  const [machines, setMachines] = useState<MachineOption[]>([]);
+  const [users, setUsers] = useState<UserOption[]>([]);
   const [loadingInit, setLoadingInit] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [customerModalOpen, setCustomerModalOpen] = useState(false);
 
   useEffect(() => {
-    Promise.all([getCustomers(), getParts()])
-      .then(([c, p]) => { setCustomers(c); setParts(p); })
+    Promise.all([getCustomers(), getMachines(), getUsers()])
+      .then(([c, m, u]) => { setCustomers(c); setMachines(m); setUsers(u); })
       .finally(() => setLoadingInit(false));
-  }, []);
-
-  // when part is selected in a line, fetch its FS
-  const handlePartChange = useCallback(async (lineKey: string, partId: string) => {
-    setLines((prev) => prev.map((l) =>
-      l._key !== lineKey ? l
-        : { ...l, partId, feasibilityId: "", feasibilityStudies: [], loadingFS: !!partId, suggestedMachine: "" },
-    ));
-    if (!partId) return;
-    const options = await getPartFeasibilityStudies(partId);
-    setLines((prev) => prev.map((l) => {
-      if (l._key !== lineKey) return l;
-      const auto = options.length === 1 ? options[0] : null;
-      return {
-        ...l,
-        loadingFS: false,
-        feasibilityStudies: options,
-        feasibilityId: auto ? auto.id : "",
-        suggestedMachine: auto?.machine
-          ? (auto.machine as LineForm["suggestedMachine"])
-          : l.suggestedMachine,
-      };
-    }));
-  }, []);
-
-  // when FS is selected, populate machine
-  const handleFSChange = useCallback((lineKey: string, fsId: string) => {
-    setLines((prev) => prev.map((l) => {
-      if (l._key !== lineKey) return l;
-      const fs = l.feasibilityStudies.find((s) => s.id === fsId);
-      return {
-        ...l,
-        feasibilityId: fsId,
-        suggestedMachine: fs?.machine
-          ? (fs.machine as LineForm["suggestedMachine"])
-          : l.suggestedMachine,
-      };
-    }));
   }, []);
 
   function setLine(key: string, patch: Partial<LineForm>) {
     setLines((prev) => prev.map((l) => l._key === key ? { ...l, ...patch } : l));
-  }
-
-  function setDie(lineKey: string, dieKey: string, patch: Partial<DieSet>) {
-    setLines((prev) => prev.map((l) => {
-      if (l._key !== lineKey) return l;
-      return { ...l, dieSets: l.dieSets.map((d) => d._key === dieKey ? { ...d, ...patch } : d) };
-    }));
   }
 
   function addLine() {
@@ -244,64 +304,88 @@ export default function EnquiryForm({ mode, enquiryId, initialData }: Props) {
     setLines((prev) => prev.filter((l) => l._key !== key));
   }
 
-  function addDie(lineKey: string) {
-    setLines((prev) => prev.map((l) => l._key !== lineKey ? l : { ...l, dieSets: [...l.dieSets, emptyDieSet()] }));
+  function addFilesToLine(key: string, newFiles: File[]) {
+    setLines((prev) => prev.map((l) => l._key !== key ? l : { ...l, files: [...l.files, ...newFiles] }));
   }
 
-  function removeDie(lineKey: string, dieKey: string) {
-    setLines((prev) => prev.map((l) => l._key !== lineKey ? l : { ...l, dieSets: l.dieSets.filter((d) => d._key !== dieKey) }));
+  function removeStagedFile(key: string, index: number) {
+    setLines((prev) => prev.map((l) => l._key !== key ? l : { ...l, files: l.files.filter((_, i) => i !== index) }));
+  }
+
+  async function handleOpenAttachment(attachmentId: number) {
+    try {
+      const url = await viewEnquiryAttachment(attachmentId);
+      window.open(url, "_blank");
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch {
+      alert("Could not open attachment");
+    }
+  }
+
+  async function handleDeleteAttachment(key: string, attachmentId: number) {
+    try {
+      await deleteEnquiryAttachment(attachmentId);
+      setLines((prev) => prev.map((l) => l._key !== key
+        ? l
+        : { ...l, existingAttachments: l.existingAttachments.filter((a) => a.attachmentId !== attachmentId) }));
+    } catch {
+      alert("Could not delete attachment");
+    }
   }
 
   // ── summary ────────────────────────────────────────────────────────────────
 
-  const totalDieSets = lines.reduce((a, l) => a + l.dieSets.length, 0);
   const totalQtyMonth = lines.reduce((a, l) => a + (parseInt(l.qtyPerMonth) || 0), 0);
   const totalQtyYear = totalQtyMonth * 12;
-  const totalDieCost = lines.reduce((a, l) =>
-    a + l.dieSets.reduce((s, d) => s + (parseFloat(d.estimatedDieCost) || 0), 0), 0);
 
   // ── submit ─────────────────────────────────────────────────────────────────
 
   async function submit(submitStatus?: string) {
     if (!customerId) return alert("Please select a customer");
-    if (lines.some((l) => !l.partId)) return alert("Please select a part for each line");
+    if (lines.some((l) => !l.partName.trim())) return alert("Please enter a part name for each line");
+    if (lines.some((l) => !l.supplyType)) return alert("Please select a supply type for each line");
+
     setSubmitting(true);
     try {
       const dto: Record<string, unknown> = {
         customerId: parseInt(customerId),
         enquiryDate,
-        receivedBy: receivedBy || undefined,
+        receivedBy: receivedBy ? parseInt(receivedBy) : undefined,
         status: submitStatus ?? status,
         remarks: remarks || undefined,
         lines: lines.map((l) => ({
-          partId: parseInt(l.partId),
-          feasibilityId: l.feasibilityId ? parseInt(l.feasibilityId) : undefined,
+          lineId: l.lineId,
+          part: l.lineId ? undefined : {
+            partName: l.partName,
+            partDrawingNumber: l.partDrawingNumber || undefined,
+            materialGrade: l.materialGrade || undefined,
+          },
+          supplyType: l.supplyType,
           qtyPerMonth: l.qtyPerMonth ? parseInt(l.qtyPerMonth) : undefined,
-          qtyPerYear: l.qtyPerMonth ? parseInt(l.qtyPerMonth) * 12 : undefined,
-          suggestedMachine: l.suggestedMachine || undefined,
-          heatTreatmentRequired: l.heatTreatmentRequired,
-          heatTreatmentSpec: l.heatTreatmentSpec || undefined,
+          suggestedMachineId: l.suggestedMachineId ? parseInt(l.suggestedMachineId) : undefined,
+          deliveryState: l.deliveryState || undefined,
           specialRequirements: l.specialRequirements || undefined,
           lineRemarks: l.lineRemarks || undefined,
-          toolingDetails: l.dieSets
-            .filter((d) => d.estimatedDieCost || d.dieRemarks || d.dieDrawingAvailable)
-            .map((d) => ({
-              dieDrawingAvailable: d.dieDrawingAvailable || undefined,
-              estimatedDieCost: d.estimatedDieCost ? parseFloat(d.estimatedDieCost) : undefined,
-              dieAmortisationQty: d.dieAmortisationQty ? parseInt(d.dieAmortisationQty) : undefined,
-              dieAmortisationPerPc:
-                d.estimatedDieCost && d.dieAmortisationQty
-                  ? parseFloat(d.estimatedDieCost) / parseInt(d.dieAmortisationQty)
-                  : undefined,
-              dieRemarks: d.dieRemarks || undefined,
-            })),
         })),
       };
 
       if (mode === "new") {
-        await createEnquiry(dto);
+        const created = await createEnquiry(dto);
+        await Promise.all(
+          created.enquiryLines.map((createdLine, i) => {
+            const files = lines[i]?.files;
+            return files?.length ? uploadEnquiryLineAttachments(createdLine.lineId, files) : Promise.resolve([]);
+          }),
+        );
       } else {
-        await updateEnquiry(enquiryId!, dto);
+        const updated = await updateEnquiry(enquiryId!, dto);
+        await Promise.all(
+          lines.map((l, i) => {
+            if (!l.files.length) return Promise.resolve([]);
+            const lineId = l.lineId ?? updated.enquiryLines[i]?.lineId;
+            return lineId ? uploadEnquiryLineAttachments(lineId, l.files) : Promise.resolve([]);
+          }),
+        );
       }
       router.push("/enquiries");
     } catch (err) {
@@ -322,12 +406,15 @@ export default function EnquiryForm({ mode, enquiryId, initialData }: Props) {
     );
   }
 
-  const inputSx = { backgroundColor: "background.surface" };
-  const filteredParts = customerId
-    ? parts.filter((p) => String(p.customerId) === customerId)
-    : parts;
-
-  const titleLine = `${lines.length} part${lines.length !== 1 ? "s" : ""} · ${totalDieSets} die${totalDieSets !== 1 ? "s" : ""}`;
+  const inputSx = {
+    backgroundColor: MUTED_GREY,
+    "&:focus-within": {
+      "--Input-focusedHighlight": "var(--joy-palette-primary-200)",
+      "--Select-focusedHighlight": "var(--joy-palette-primary-200)",
+      borderColor: "var(--joy-palette-primary-300) !important",
+    },
+  };
+  const titleLine = `${lines.length} part${lines.length !== 1 ? "s" : ""}`;
 
   return (
     <Box sx={{ maxWidth: 960, mx: "auto", pb: 8 }}>
@@ -352,7 +439,7 @@ export default function EnquiryForm({ mode, enquiryId, initialData }: Props) {
             variant="outlined"
             color="primary"
             startDecorator={submitting ? <CircularProgress size="sm" /> : undefined}
-            onClick={() => submit("Open")}
+            onClick={() => submit("Draft")}
             disabled={submitting}
           >
             Save Draft
@@ -360,7 +447,7 @@ export default function EnquiryForm({ mode, enquiryId, initialData }: Props) {
           <Button
             color="success"
             startDecorator={submitting ? <CircularProgress size="sm" /> : undefined}
-            onClick={() => submit()}
+            onClick={() => submit("Open")}
             disabled={submitting}
           >
             Submit
@@ -373,19 +460,33 @@ export default function EnquiryForm({ mode, enquiryId, initialData }: Props) {
         <SectionHeader label="ENQUIRY HEADER" />
         <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 2, mb: 2 }}>
           <Field label="Enquiry Number">
-            <Input value={enquiryNumber || (mode === "new" ? "Auto-generated" : "")} disabled sx={{ backgroundColor: "neutral.100", color: "neutral.500" }} />
+            <Input
+              value={enquiryNumber || (mode === "new" ? "Auto-generated" : "")}
+              readOnly
+              sx={{
+                backgroundColor: "primary.50",
+                color: "primary.600",
+                border: "1.5px solid",
+                borderColor: "#84c0e9",
+              }}
+            />
           </Field>
           <Field label="Customer" required>
-            <Select
-              placeholder="— Select customer —"
-              value={customerId || null}
-              onChange={(_, v) => { setCustomerId(v ?? ""); }}
-              sx={inputSx}
-            >
-              {customers.map((c) => (
-                <Option key={c.id} value={c.id}>{c.name}</Option>
-              ))}
-            </Select>
+            <Box sx={{ display: "flex", gap: 1 }}>
+              <Select
+                placeholder="— Select customer —"
+                value={customerId || null}
+                onChange={(_, v) => { setCustomerId(v ?? ""); }}
+                sx={{ ...inputSx, flex: 1 }}
+              >
+                {customers.map((c) => (
+                  <Option key={c.id} value={c.id}>{c.name}</Option>
+                ))}
+              </Select>
+              <IconButton variant="outlined" color="neutral" onClick={() => setCustomerModalOpen(true)}>
+                <AddIcon fontSize="small" />
+              </IconButton>
+            </Box>
           </Field>
           <Field label="Enquiry Date" required>
             <Input type="date" value={enquiryDate} onChange={(e) => setEnquiryDate(e.target.value)} sx={inputSx} />
@@ -393,12 +494,22 @@ export default function EnquiryForm({ mode, enquiryId, initialData }: Props) {
         </Box>
         <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 2 }}>
           <Field label="Received By">
-            <Input placeholder="Arjun Kumar" value={receivedBy} onChange={(e) => setReceivedBy(e.target.value)} sx={inputSx} />
+            <Select
+              placeholder="— Select user —"
+              value={receivedBy || null}
+              onChange={(_, v) => setReceivedBy(v ?? "")}
+              sx={inputSx}
+            >
+              {users.map((u) => (
+                <Option key={u.id} value={u.id}>{u.name}</Option>
+              ))}
+            </Select>
           </Field>
           <Field label="Status" required>
             <Select value={status} onChange={(_, v) => v && setStatus(v)} sx={inputSx}>
+              <Option value="Draft">Draft</Option>
               <Option value="Open">Open</Option>
-              <Option value="Feasibility">Feasibility</Option>
+              <Option value="Under_Feasibility">Under Feasibility</Option>
               <Option value="Quoted">Quoted</Option>
               <Option value="Won">Won</Option>
               <Option value="Lost">Lost</Option>
@@ -417,7 +528,7 @@ export default function EnquiryForm({ mode, enquiryId, initialData }: Props) {
           <Box>
             <Typography level="title-lg">Enquiry Lines</Typography>
             <Typography level="body-xs" sx={{ color: "neutral.500" }}>
-              Select one or more parts. Each line links a part to a feasibility study and captures tooling requirements.
+              Add one or more parts. Each line captures part details and quantities. Tooling details are filled in during Feasibility Study.
             </Typography>
           </Box>
           <Button size="sm" onClick={addLine}>
@@ -425,198 +536,139 @@ export default function EnquiryForm({ mode, enquiryId, initialData }: Props) {
           </Button>
         </Box>
 
-        {lines.map((line, lineIdx) => {
-          const partName = filteredParts.find((p) => p.id === line.partId)?.name;
-          const dieCount = line.dieSets.length;
-
-          return (
-            <SectionBox key={line._key} sx={{ mb: 2 }}>
-              {/* Line header */}
-              <Box
-                onClick={() => setLine(line._key, { expanded: !line.expanded })}
-                sx={{ display: "flex", alignItems: "center", gap: 1.5, px: 2, py: 1.5, cursor: "pointer", borderBottom: line.expanded ? "1px solid" : "none", borderColor: "neutral.200", userSelect: "none" }}
-              >
-                {line.expanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
-                <Chip size="sm" color="primary" variant="soft">LINE {lineIdx + 1}</Chip>
-                <Typography level="body-sm" sx={{ color: partName ? "text.primary" : "neutral.400", flex: 1 }}>
-                  {partName ?? "Select a part..."}
-                </Typography>
-                <Typography level="body-xs" sx={{ color: "neutral.500" }}>{dieCount} die{dieCount !== 1 ? "s" : ""}</Typography>
-                {lines.length > 1 && (
-                  <Button
-                    size="sm" variant="plain" color="danger"
-                    onClick={(e) => { e.stopPropagation(); removeLine(line._key); }}
-                    sx={{ minWidth: 0, px: 0.5 }}
-                  >
-                    <DeleteOutlinedIcon style={{ fontSize: 16 }} />
-                  </Button>
-                )}
-              </Box>
-
-              {line.expanded && (
-                <Box sx={{ p: 2, display: "flex", flexDirection: "column", gap: 2 }}>
-
-                  {/* Part & Feasibility Study */}
-                  <SectionBox sx={{ p: 2 }}>
-                    <SectionHeader label="PART & FEASIBILITY STUDY" />
-                    <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
-                      <Field label="Part" required>
-                        <Select
-                          placeholder="— Select part —"
-                          value={line.partId || null}
-                          onChange={(_, v) => handlePartChange(line._key, v ?? "")}
-                          sx={inputSx}
-                        >
-                          {filteredParts.map((p) => (
-                            <Option key={p.id} value={p.id}>{p.name}{p.drawingNumber ? ` (${p.drawingNumber})` : ""}</Option>
-                          ))}
-                        </Select>
-                      </Field>
-                      <Field label="Feasibility Study" required>
-                        {line.loadingFS ? (
-                          <Box sx={{ display: "flex", alignItems: "center", gap: 1, height: 36 }}>
-                            <CircularProgress size="sm" />
-                            <Typography level="body-sm" sx={{ color: "neutral.400" }}>Loading...</Typography>
-                          </Box>
-                        ) : (
-                          <Select
-                            placeholder={line.partId ? (line.feasibilityStudies.length ? "Select study..." : "No studies found") : "Select a part first"}
-                            value={line.feasibilityId || null}
-                            onChange={(_, v) => handleFSChange(line._key, v ?? "")}
-                            disabled={!line.partId || line.feasibilityStudies.length === 0}
-                            sx={inputSx}
-                          >
-                            {line.feasibilityStudies.map((s) => (
-                              <Option key={s.id} value={s.id}>{s.label}</Option>
-                            ))}
-                          </Select>
-                        )}
-                      </Field>
-                    </Box>
-                  </SectionBox>
-
-                  {/* Production Requirements */}
-                  <SectionBox sx={{ p: 2 }}>
-                    <SectionHeader label="PRODUCTION REQUIREMENTS" />
-                    <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr 2fr", gap: 2, mb: 2 }}>
-                      <Field label="Qty per Month">
-                        <Input type="number" placeholder="e.g. 500" value={line.qtyPerMonth} onChange={(e) => setLine(line._key, { qtyPerMonth: e.target.value })} sx={inputSx} />
-                      </Field>
-                      <Field label="Qty per Year (auto)">
-                        <Input
-                          value={line.qtyPerMonth ? String(parseInt(line.qtyPerMonth) * 12) : "—"}
-                          disabled
-                          sx={{ backgroundColor: "neutral.100", color: "neutral.500", fontStyle: "italic" }}
-                        />
-                      </Field>
-                      <Field label="Suggested Machine">
-                        <Select
-                          placeholder="Select or inherit from FS..."
-                          value={line.suggestedMachine || null}
-                          onChange={(_, v) => setLine(line._key, { suggestedMachine: (v ?? "") as LineForm["suggestedMachine"] })}
-                          sx={inputSx}
-                        >
-                          <Option value="Press_1000T">1000T Press</Option>
-                          <Option value="Belt_Hammer_075T">0.75T Belt Hammer</Option>
-                          <Option value="TBD">TBD</Option>
-                        </Select>
-                      </Field>
-                    </Box>
-                    <Box sx={{ mb: 2 }}>
-                      <Checkbox
-                        label="Heat Treatment Required"
-                        checked={line.heatTreatmentRequired}
-                        onChange={(e) => setLine(line._key, { heatTreatmentRequired: e.target.checked })}
-                      />
-                    </Box>
-                    <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
-                      <Field label="Special Requirements">
-                        <Textarea minRows={2} placeholder="NDT, surface treatment, certifications, inspection clauses..." value={line.specialRequirements} onChange={(e) => setLine(line._key, { specialRequirements: e.target.value })} sx={inputSx} />
-                      </Field>
-                      <Field label="Line Remarks">
-                        <Textarea minRows={2} placeholder="Any notes specific to this line item..." value={line.lineRemarks} onChange={(e) => setLine(line._key, { lineRemarks: e.target.value })} sx={inputSx} />
-                      </Field>
-                    </Box>
-                  </SectionBox>
-
-                  {/* Tooling / Die Details */}
-                  <SectionBox sx={{ p: 2 }}>
-                    <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
-                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                        <BuildOutlinedIcon style={{ fontSize: 14, color: "var(--joy-palette-primary-500)" }} />
-                        <Typography level="body-xs" fontWeight="lg" sx={{ letterSpacing: "0.08em", color: "neutral.500" }}>
-                          TOOLING / DIE DETAILS
-                        </Typography>
-                        <Typography level="body-xs" sx={{ color: "neutral.500" }}>— {line.dieSets.length} set{line.dieSets.length !== 1 ? "s" : ""}</Typography>
-                      </Box>
-                      <Button size="sm" variant="outlined" onClick={() => addDie(line._key)}>
-                        + Add Die / Tool
-                      </Button>
-                    </Box>
-
-                    {line.dieSets.map((die, dieIdx) => {
-                      const amortPerPc =
-                        die.estimatedDieCost && die.dieAmortisationQty
-                          ? (parseFloat(die.estimatedDieCost) / parseInt(die.dieAmortisationQty)).toFixed(2)
-                          : "—";
-                      return (
-                        <Box key={die._key} sx={{ mb: dieIdx < line.dieSets.length - 1 ? 2 : 0 }}>
-                          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}>
-                            <Typography level="body-xs" fontWeight="lg" sx={{ color: "primary.600" }}>
-                              Die / Tooling Set #{dieIdx + 1}
-                            </Typography>
-                            {line.dieSets.length > 1 && (
-                              <Button size="sm" variant="plain" color="danger" sx={{ minWidth: 0 }} onClick={() => removeDie(line._key, die._key)}>
-                                <DeleteOutlinedIcon style={{ fontSize: 14 }} />
-                              </Button>
-                            )}
-                          </Box>
-                          <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 2, mb: 1.5 }}>
-                            <Field label="Die Drawing">
-                              <Select
-                                placeholder="Select..."
-                                value={die.dieDrawingAvailable || null}
-                                onChange={(_, v) => setDie(line._key, die._key, { dieDrawingAvailable: (v ?? "") as DieSet["dieDrawingAvailable"] })}
-                                sx={inputSx}
-                              >
-                                <Option value="Customer_Provides">Customer Provides</Option>
-                                <Option value="To_Be_Developed">To Be Developed</Option>
-                                <Option value="Existing_Die">Existing Die</Option>
-                              </Select>
-                            </Field>
-                            <Field label="Est. Die Cost (₹)">
-                              <Input type="number" placeholder="0" value={die.estimatedDieCost} onChange={(e) => setDie(line._key, die._key, { estimatedDieCost: e.target.value })} sx={inputSx} />
-                            </Field>
-                            <Field label="Amortisation Qty">
-                              <Input type="number" placeholder="e.g. 10000" value={die.dieAmortisationQty} onChange={(e) => setDie(line._key, die._key, { dieAmortisationQty: e.target.value })} sx={inputSx} />
-                            </Field>
-                            <Field label="Amort. per pc (₹) (auto)">
-                              <Input value={amortPerPc} disabled sx={{ backgroundColor: "neutral.100", color: "neutral.500", fontStyle: "italic" }} />
-                            </Field>
-                          </Box>
-                          <Field label="Die Remarks">
-                            <Textarea minRows={2} placeholder="Condition, supplier, lead time..." value={die.dieRemarks} onChange={(e) => setDie(line._key, die._key, { dieRemarks: e.target.value })} sx={inputSx} />
-                          </Field>
-                          {dieIdx < line.dieSets.length - 1 && <Divider sx={{ mt: 2 }} />}
-                        </Box>
-                      );
-                    })}
-                  </SectionBox>
-                </Box>
+        {lines.map((line, lineIdx) => (
+          <SectionBox key={line._key} sx={{ mb: 2, overflow: "hidden" }}>
+            {/* Line header */}
+            <Box
+              onClick={() => setLine(line._key, { expanded: !line.expanded })}
+              sx={{ display: "flex", alignItems: "center", gap: 1.5, px: 2, py: 1.5, cursor: "pointer", backgroundColor: "primary.50", userSelect: "none" }}
+            >
+              {line.expanded
+                ? <ExpandLessIcon fontSize="small" style={{ color: "var(--joy-palette-primary-700)" }} />
+                : <ExpandMoreIcon fontSize="small" style={{ color: "var(--joy-palette-primary-700)" }} />}
+              <Chip size="sm" variant="soft" sx={{ backgroundColor: "primary.100", color: "primary.700", fontWeight: 700 }}>LINE {lineIdx + 1}</Chip>
+              <Typography level="body-sm" sx={{ color: line.partName ? "primary.800" : "primary.400", flex: 1, fontStyle: line.partName ? "normal" : "italic" }}>
+                {line.partName || "Enter part details..."}
+              </Typography>
+              {lines.length > 1 && (
+                <Button
+                  size="sm" variant="plain" color="danger"
+                  onClick={(e) => { e.stopPropagation(); removeLine(line._key); }}
+                  sx={{ minWidth: 0, px: 0.5 }}
+                >
+                  <DeleteOutlinedIcon style={{ fontSize: 16 }} />
+                </Button>
               )}
-            </SectionBox>
-          );
-        })}
+            </Box>
+
+            {line.expanded && (
+              <Box sx={{ p: 2, display: "flex", flexDirection: "column", gap: 2 }}>
+
+                {/* Part Details */}
+                <SectionBox muted sx={{ p: 2 }}>
+                  <SectionHeader label="PART DETAILS" />
+                  <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 2, mb: 2 }}>
+                    <Field label="Part Name" required>
+                      <Input placeholder="e.g. Connecting Rod" value={line.partName} onChange={(e) => setLine(line._key, { partName: e.target.value })} sx={inputSx} disabled={!!line.lineId} />
+                    </Field>
+                    <Field label="Drawing Number">
+                      <Input placeholder="e.g. CR-4521-A" value={line.partDrawingNumber} onChange={(e) => setLine(line._key, { partDrawingNumber: e.target.value })} sx={inputSx} disabled={!!line.lineId} />
+                    </Field>
+                    <Field label="Material Grade">
+                      <Input placeholder="e.g. EN8, 42CrMo4" value={line.materialGrade} onChange={(e) => setLine(line._key, { materialGrade: e.target.value })} sx={inputSx} disabled={!!line.lineId} />
+                    </Field>
+                  </Box>
+                  <Box sx={{ mb: 2 }}>
+                    <Field label="Supply" required>
+                      <SupplyTypeToggle value={line.supplyType} onChange={(v) => setLine(line._key, { supplyType: v })} />
+                    </Field>
+                  </Box>
+                  <LineAttachments
+                    line={line}
+                    onFilesAdded={(files) => addFilesToLine(line._key, files)}
+                    onRemoveStaged={(i) => removeStagedFile(line._key, i)}
+                    onDeleteExisting={(attachmentId) => handleDeleteAttachment(line._key, attachmentId)}
+                    onOpenExisting={handleOpenAttachment}
+                  />
+                </SectionBox>
+
+                {/* Production Requirements */}
+                <SectionBox muted sx={{ p: 2 }}>
+                  <SectionHeader label="PRODUCTION REQUIREMENTS" />
+                  <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 2, mb: 2 }}>
+                    <Field label="Qty per Month">
+                      <Input type="number" placeholder="e.g. 500" value={line.qtyPerMonth} onChange={(e) => setLine(line._key, { qtyPerMonth: e.target.value })} sx={inputSx} />
+                    </Field>
+                    <Field label="Qty per Year" auto>
+                      <Input
+                        value={line.qtyPerMonth ? String(parseInt(line.qtyPerMonth) * 12) : "—"}
+                        readOnly
+                        sx={{
+                          backgroundColor: "primary.50",
+                          color: "primary.600",
+                          fontStyle: "italic",
+                          border: "1.5px solid",
+                          borderColor: "#84c0e9",
+                        }}
+                      />
+                    </Field>
+                    <Field label="Suggested Machine">
+                      <Select
+                        placeholder="Select..."
+                        value={line.suggestedMachineId || null}
+                        onChange={(_, v) => setLine(line._key, { suggestedMachineId: v ?? "" })}
+                        sx={inputSx}
+                      >
+                        {machines.map((m) => (
+                          <Option key={m.id} value={m.id}>{m.name}</Option>
+                        ))}
+                      </Select>
+                    </Field>
+                  </Box>
+                  <Box sx={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 2, mb: 2 }}>
+                    <Field label="Delivery State">
+                      <Select
+                        placeholder="Select..."
+                        value={line.deliveryState || null}
+                        onChange={(_, v) => setLine(line._key, { deliveryState: (v ?? "") as LineForm["deliveryState"] })}
+                        sx={inputSx}
+                      >
+                        <Option value="As_Forged">As Forged</Option>
+                        <Option value="Machined">Machined</Option>
+                      </Select>
+                    </Field>
+                  </Box>
+                  <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
+                    <Field label="Special Requirements">
+                      <Textarea minRows={2} placeholder="NDT, surface treatment, certifications, inspection clauses..." value={line.specialRequirements} onChange={(e) => setLine(line._key, { specialRequirements: e.target.value })} sx={inputSx} />
+                    </Field>
+                    <Field label="Line Remarks">
+                      <Textarea minRows={2} placeholder="Any notes specific to this line item..." value={line.lineRemarks} onChange={(e) => setLine(line._key, { lineRemarks: e.target.value })} sx={inputSx} />
+                    </Field>
+                  </Box>
+                </SectionBox>
+              </Box>
+            )}
+          </SectionBox>
+        ))}
       </Box>
 
       {/* ── Summary Bar ── */}
       <Box sx={{ position: "sticky", bottom: 0, mx: -3, px: 3, py: 1.5, backgroundColor: "background.surface", borderTop: "1px solid", borderColor: "neutral.200", display: "flex", gap: 3, alignItems: "center" }}>
         <Typography level="body-sm"><strong>Parts:</strong> {lines.length}</Typography>
-        <Typography level="body-sm"><strong>Total Die Sets:</strong> {totalDieSets}</Typography>
-        <Typography level="body-sm"><strong>Total Qty/Month:</strong> {totalQtyMonth || 0}</Typography>
-        <Typography level="body-sm"><strong>Total Qty/Year:</strong> {totalQtyYear || 0}</Typography>
-        <Typography level="body-sm"><strong>Est. Total Die Cost:</strong> ₹{totalDieCost.toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</Typography>
+        <Typography level="body-sm"><strong>Qty/Month:</strong> {totalQtyMonth || 0}</Typography>
+        <Typography level="body-sm"><strong>Qty/Year:</strong> {totalQtyYear || 0}</Typography>
       </Box>
+
+      <AddCustomerModal
+        open={customerModalOpen}
+        onClose={() => setCustomerModalOpen(false)}
+        onCreated={(c) => {
+          setCustomers((prev) => [...prev, c]);
+          setCustomerId(c.id);
+          setCustomerModalOpen(false);
+        }}
+      />
     </Box>
   );
 }

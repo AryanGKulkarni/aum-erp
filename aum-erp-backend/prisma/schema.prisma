@@ -23,6 +23,7 @@ model Customer {
 
   parts         Part[]
   enquiries     Enquiry[]
+  quotations    Quotation[]
 
   @@map("customers")
 }
@@ -38,129 +39,206 @@ enum PartStatus {
 
 model Part {
   partId             Int        @id @default(autoincrement()) @map("part_id")
-  customerId         Int?       @map("customer_id")
+  customerId         Int        @map("customer_id")
   partName           String     @map("part_name") @db.VarChar(150)
   partDrawingNumber  String?    @map("part_drawing_number") @db.VarChar(50)
   materialGrade      String?    @map("material_grade") @db.VarChar(50)
-  forgingWeightKg    Decimal?   @map("forging_weight_kg") @db.Decimal(8, 3)
-  finishWeightKg     Decimal?   @map("finish_weight_kg") @db.Decimal(8, 3)
-  billetDiameterMm   Decimal?   @map("billet_diameter_mm") @db.Decimal(6, 2)
-  billetLengthMm     Decimal?   @map("billet_length_mm") @db.Decimal(6, 2)
-  noOfOperations     Int?       @map("no_of_operations")
-  partStatus         PartStatus @map("part_status")
   createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamp
 
-  customer           Customer?  @relation(fields: [customerId], references: [customerId], onDelete: Cascade)
+  customer           Customer   @relation(fields: [customerId], references: [customerId], onDelete: Cascade)
   attachments        PartAttachment[]
-  toolingDetails     ToolingDetail[]
-  feasibilityStudies FeasibilityStudy[]
   enquiryLines       EnquiryLine[]
 
+  @@unique([customerId, partDrawingNumber], map: "uk_customer_drawing")
   @@map("parts")
 }
 
 // 3. Part Attachments Model
 model PartAttachment {
-  attachmentId Int      @id @default(autoincrement()) @map("attachment_id")
-  partId       Int      @map("part_id")
-  fileName     String   @map("file_name") @db.VarChar(255)
-  filePath     String   @map("file_path") @db.VarChar(500)
-  uploadedBy   String?  @map("uploaded_by") @db.VarChar(100)
-  uploadedAt   DateTime @default(now()) @map("uploaded_at") @db.Timestamp
-  remarks      String?  @db.Text
+  attachmentId  Int          @id @default(autoincrement()) @map("attachment_id")
+  partId        Int          @map("part_id")
+  enquiryLineId Int?         @map("enquiry_line_id")
+  fileName      String       @map("file_name") @db.VarChar(255)
+  filePath      String       @map("file_path") @db.VarChar(500)
+  fileType      String?      @map("file_type") @db.VarChar(10)
+  fileSizeKb    Int?         @map("file_size_kb")
+  uploadedBy    Int?         @map("uploaded_by")
+  uploadedAt    DateTime     @default(now()) @map("uploaded_at") @db.Timestamp
+  remarks       String?      @db.Text
 
-  part         Part     @relation(fields: [partId], references: [partId], onDelete: Cascade)
+  part          Part         @relation(fields: [partId], references: [partId], onDelete: Cascade)
+  enquiryLine   EnquiryLine? @relation(fields: [enquiryLineId], references: [lineId])
+  uploader      User?        @relation(fields: [uploadedBy], references: [userId])
 
   @@map("part_attachments")
 }
 
-// 4. Tooling Details Model
-enum DieDrawingAvailable {
+// 4. Tooling Sets Model
+enum DieDrawingStatus {
   Customer_Provides @map("Customer Provides")
   To_Be_Developed   @map("To Be Developed")
   Existing_Die      @map("Existing Die")
 }
 
-model ToolingDetail {
-  toolingId            Int                  @id @default(autoincrement()) @map("tooling_id")
-  partId               Int                  @map("part_id")
-  dieDrawingAvailable  DieDrawingAvailable? @map("die_drawing_available")
-  estimatedDieCost     Decimal?             @map("estimated_die_cost") @db.Decimal(12, 2)
-  dieAmortisationQty   Int?                 @map("die_amortisation_qty")
-  dieAmortisationPerPc Decimal?             @map("die_amortisation_per_pc") @db.Decimal(8, 2)
-  dieRemarks           String?              @map("die_remarks") @db.Text
+model ToolingSet {
+  toolingId            Int               @id @default(autoincrement()) @map("tooling_id")
+  feasibilityLineId    Int               @map("feasibility_line_id")
+  setNumber            Int               @map("set_number")
+  dieDrawingStatus     DieDrawingStatus? @map("die_drawing_status")
+  estimatedDieCost     Decimal?          @map("estimated_die_cost") @db.Decimal(12, 2)
+  dieAmortisationQty   Int?              @map("die_amortisation_qty")
+  dieAmortisationPerPc Decimal?          @map("die_amortisation_per_pc") @db.Decimal(10, 2)
+  dieRemarks           String?           @map("die_remarks") @db.Text
 
-  part                 Part                 @relation(fields: [partId], references: [partId], onDelete: Cascade)
+  feasibilityLine      FeasibilityLine   @relation(fields: [feasibilityLineId], references: [feasibilityLineId], onDelete: Cascade)
 
-  @@map("tooling_details")
+  @@unique([feasibilityLineId, setNumber], map: "uk_line_set")
+  @@map("tooling_sets")
 }
 
 // 4. Feasibility Study Model
-enum RecommendedMachine {
-  Press_1000T      @map("1000T Press")
-  Belt_Hammer_075T @map("0.75T Belt Hammer")
-}
-
 enum OverallVerdict {
   Feasible
   Not_Feasible @map("Not Feasible")
   Conditional
 }
 
+enum FeasibilityStudyStatus {
+  Draft
+  Submitted_for_Review @map("Submitted for Review")
+  Reviewed
+  Quoted
+}
+
 model FeasibilityStudy {
-  feasibilityId          Int                 @id @default(autoincrement()) @map("feasibility_id")
-  partId                 Int                 @map("part_id")
-  assessedBy             String?             @map("assessed_by") @db.VarChar(100)
-  assessmentDate         DateTime?           @map("assessment_date") @db.Date
-  recommendedMachine     RecommendedMachine? @map("recommended_machine")
-  billetWeightEstKg      Decimal?            @map("billet_weight_est_kg") @db.Decimal(8, 3)
-  flashAllowancePct      Decimal?            @map("flash_allowance_pct") @db.Decimal(5, 2)
-  materialUtilisationPct Decimal?            @map("material_utilisation_pct") @db.Decimal(5, 2)
-  cycleTimeMin           Decimal?            @map("cycle_time_min") @db.Decimal(6, 2)
-  machineLoadHrsMonth    Decimal?            @map("machine_load_hrs_month") @db.Decimal(8, 2)
-  availableCapacityHrs   Decimal?            @map("available_capacity_hrs") @db.Decimal(8, 2)
-  capacityFeasible       Boolean?            @map("capacity_feasible")
-  flagsRisks             String?             @map("flags_risks") @db.Text
-  overallVerdict         OverallVerdict?     @map("overall_verdict")
-  verdictRemarks         String?             @map("verdict_remarks") @db.Text
-  createdAt              DateTime            @default(now()) @map("created_at") @db.Timestamp
+  studyId        Int                     @id @default(autoincrement()) @map("study_id")
+  enquiryId      Int                     @unique @map("enquiry_id")
+  assessedBy     Int?                    @map("assessed_by")
+  assessmentDate DateTime?               @map("assessment_date") @db.Date
+  studyStatus    FeasibilityStudyStatus  @default(Draft) @map("study_status")
+  reviewedBy     Int?                    @map("reviewed_by")
+  reviewedAt     DateTime?               @map("reviewed_at") @db.Timestamp
+  createdAt      DateTime                @default(now()) @map("created_at") @db.Timestamp
+  updatedAt      DateTime                @updatedAt @map("updated_at") @db.Timestamp
 
-  part                   Part                @relation(fields: [partId], references: [partId], onDelete: Cascade)
-  costEstimations        CostEstimation[]
-  enquiryLines           EnquiryLine[]
+  enquiry         Enquiry          @relation(fields: [enquiryId], references: [enquiryId])
+  assessedByUser  User?            @relation("FeasibilityAssessedBy", fields: [assessedBy], references: [userId])
+  reviewedByUser  User?            @relation("FeasibilityReviewedBy", fields: [reviewedBy], references: [userId])
+  feasibilityLines FeasibilityLine[]
+  quotations       Quotation[]
 
-  @@map("feasibility_study")
+  @@map("feasibility_studies")
+}
+
+// 4b. Feasibility Lines Model
+enum CapacityFeasibility {
+  Yes
+  Over_Capacity @map("Over Capacity")
+  Not_Assessed  @map("Not Assessed")
+}
+
+model FeasibilityLine {
+  feasibilityLineId Int @id @default(autoincrement()) @map("feasibility_line_id")
+  studyId           Int @map("study_id")
+  enquiryLineId     Int @map("enquiry_line_id")
+
+  forgingWeightKg  Decimal? @map("forging_weight_kg") @db.Decimal(8, 3)
+  finishWeightKg   Decimal? @map("finish_weight_kg") @db.Decimal(8, 3)
+  billetDiameterMm Decimal? @map("billet_diameter_mm") @db.Decimal(6, 2)
+  billetLengthMm   Decimal? @map("billet_length_mm") @db.Decimal(6, 2)
+
+  recommendedMachineId   Int                  @map("recommended_machine_id")
+  billetWeightEstKg      Decimal?             @map("billet_weight_est_kg") @db.Decimal(8, 3)
+  flashAllowancePct      Decimal?             @map("flash_allowance_pct") @db.Decimal(5, 2)
+  materialUtilisationPct Decimal?             @map("material_utilisation_pct") @db.Decimal(5, 2)
+  cycleTimeMin           Decimal?             @map("cycle_time_min") @db.Decimal(6, 2)
+  machineLoadHrsMonth    Decimal?             @map("machine_load_hrs_month") @db.Decimal(8, 2)
+  availableCapacityHrs   Decimal?             @map("available_capacity_hrs") @db.Decimal(8, 2)
+  capacityFeasible       CapacityFeasibility? @default(Not_Assessed) @map("capacity_feasible")
+  flagsRisks             String?              @map("flags_risks") @db.Text
+  overallVerdict         OverallVerdict?      @map("overall_verdict")
+  verdictRemarks         String?              @map("verdict_remarks") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamp
+
+  study              FeasibilityStudy         @relation(fields: [studyId], references: [studyId], onDelete: Cascade)
+  enquiryLine        EnquiryLine              @relation(fields: [enquiryLineId], references: [lineId])
+  recommendedMachine Machine                  @relation(fields: [recommendedMachineId], references: [machineId])
+  processes          FeasibilityLineProcess[]
+  toolingSets         ToolingSet[]
+  costEstimation      CostEstimation?
+  quotationLines      QuotationLine[]
+
+  @@unique([studyId, enquiryLineId], map: "uk_study_line")
+  @@map("feasibility_lines")
+}
+
+// 4c. Feasibility Line Processes Model (join table)
+model FeasibilityLineProcess {
+  feasibilityLineId Int @map("feasibility_line_id")
+  processId         Int @map("process_id")
+
+  feasibilityLine FeasibilityLine @relation(fields: [feasibilityLineId], references: [feasibilityLineId], onDelete: Cascade)
+  process         Process         @relation(fields: [processId], references: [processId])
+
+  @@id([feasibilityLineId, processId])
+  @@map("feasibility_line_processes")
 }
 
 // 5. Cost Estimation Model
 model CostEstimation {
-  costId            Int       @id @default(autoincrement()) @map("cost_id")
-  feasibilityId     Int       @map("feasibility_id")
-  rmRatePerKg       Decimal?  @map("rm_rate_per_kg") @db.Decimal(10, 2)
-  rmCostPerPc       Decimal?  @map("rm_cost_per_pc") @db.Decimal(10, 2)
-  dieCostPerPc      Decimal?  @map("die_cost_per_pc") @db.Decimal(10, 2)
-  machineCostPerPc  Decimal?  @map("machine_cost_per_pc") @db.Decimal(10, 2)
-  labourCostPerPc   Decimal?  @map("labour_cost_per_pc") @db.Decimal(10, 2)
-  overheadPct       Decimal?  @map("overhead_pct") @db.Decimal(5, 2)
-  overheadPerPc     Decimal?  @map("overhead_per_pc") @db.Decimal(10, 2)
-  totalCostPerPc    Decimal?  @map("total_cost_per_pc") @db.Decimal(10, 2)
-  marginPct         Decimal?  @map("margin_pct") @db.Decimal(5, 2)
-  quotedPricePerPc  Decimal?  @map("quoted_price_per_pc") @db.Decimal(10, 2)
-  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamp
+  costId            Int @id @default(autoincrement()) @map("cost_id")
+  feasibilityLineId Int @unique @map("feasibility_line_id")
 
-  feasibilityStudy  FeasibilityStudy @relation(fields: [feasibilityId], references: [feasibilityId], onDelete: Cascade)
+  rmDiameterMm    Decimal? @map("rm_diameter_mm") @db.Decimal(6, 2)
+  forgingYieldPct Decimal? @map("forging_yield_pct") @db.Decimal(5, 2)
+  forgingWeightKg Decimal? @map("forging_weight_kg") @db.Decimal(8, 3)
+  cutPcWeightKg   Decimal? @map("cut_pc_weight_kg") @db.Decimal(8, 3)
+  grossWeightKg   Decimal? @map("gross_weight_kg") @db.Decimal(8, 3)
 
-  @@map("cost_estimation")
+  rmRatePerKg             Decimal? @map("rm_rate_per_kg") @db.Decimal(10, 2)
+  dieFactorPerPc          Decimal? @map("die_factor_per_pc") @db.Decimal(10, 2)
+  cuttingCostFactorPerCm2 Decimal? @map("cutting_cost_factor_per_cm2") @db.Decimal(10, 4)
+  forgingConversionPerKg  Decimal? @map("forging_conversion_per_kg") @db.Decimal(10, 2)
+  htFactorPerKg           Decimal? @map("ht_factor_per_kg") @db.Decimal(10, 2)
+  visualInspectionPerPc   Decimal? @map("visual_inspection_per_pc") @db.Decimal(10, 2)
+  rejectionFactorPct      Decimal? @map("rejection_factor_pct") @db.Decimal(5, 2)
+  iccFactorPct            Decimal? @map("icc_factor_pct") @db.Decimal(5, 2)
+  transportationFactorPct Decimal? @map("transportation_factor_pct") @db.Decimal(5, 2)
+  profitOnVaFactorPct     Decimal? @map("profit_on_va_factor_pct") @db.Decimal(5, 2)
+  scrapFactorPerKg        Decimal? @map("scrap_factor_per_kg") @db.Decimal(10, 2)
+
+  rmCost                Decimal? @map("rm_cost") @db.Decimal(12, 2)
+  cuttingCost           Decimal? @map("cutting_cost") @db.Decimal(12, 2)
+  forgingConversionCost Decimal? @map("forging_conversion_cost") @db.Decimal(12, 2)
+  htShotblastCost       Decimal? @map("ht_shotblast_cost") @db.Decimal(12, 2)
+  visualInspectionCost  Decimal? @map("visual_inspection_cost") @db.Decimal(12, 2)
+  valueAddition         Decimal? @map("value_addition") @db.Decimal(12, 2)
+  subTotal              Decimal? @map("sub_total") @db.Decimal(12, 2)
+  rejectionCost         Decimal? @map("rejection_cost") @db.Decimal(12, 2)
+  iccCost               Decimal? @map("icc_cost") @db.Decimal(12, 2)
+  transportationCost    Decimal? @map("transportation_cost") @db.Decimal(12, 2)
+  profitOnVa            Decimal? @map("profit_on_va") @db.Decimal(12, 2)
+  scrapAmount           Decimal? @map("scrap_amount") @db.Decimal(12, 2)
+  quotedPricePerPc      Decimal? @map("quoted_price_per_pc") @db.Decimal(12, 2)
+
+  calculatedAt DateTime @updatedAt @map("calculated_at") @db.Timestamp
+
+  feasibilityLine FeasibilityLine @relation(fields: [feasibilityLineId], references: [feasibilityLineId], onDelete: Cascade)
+
+  @@map("cost_estimations")
 }
 
 // 6. Enquiries Model
 enum EnquiryStatus {
+  Draft
   Open
-  Feasibility
+  Under_Feasibility @map("Under Feasibility")
   Quoted
   Won
   Lost
-  On_Hold     @map("On Hold")
+  On_Hold           @map("On Hold")
 }
 
 model Enquiry {
@@ -168,45 +246,65 @@ model Enquiry {
   enquiryNumber String        @unique @map("enquiry_number") @db.VarChar(20)
   customerId    Int           @map("customer_id")
   enquiryDate   DateTime      @map("enquiry_date") @db.Date
-  receivedBy    String?       @map("received_by") @db.VarChar(100)
-  status        EnquiryStatus
+  receivedBy    Int?          @map("received_by")
+  status        EnquiryStatus @default(Draft)
   lostReason    String?       @map("lost_reason") @db.Text
   remarks       String?       @db.Text
+  createdBy     Int?          @map("created_by")
   createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamp
   updatedAt     DateTime      @updatedAt @map("updated_at") @db.Timestamp
 
-  customer      Customer      @relation(fields: [customerId], references: [customerId], onDelete: Cascade)
-  enquiryLines  EnquiryLine[]
-  quotations    Quotation[]
-  timelines     EnquiryTimeline[]
+  customer       Customer          @relation(fields: [customerId], references: [customerId], onDelete: Cascade)
+  receivedByUser User?             @relation("EnquiryReceivedBy", fields: [receivedBy], references: [userId])
+  createdByUser  User?             @relation("EnquiryCreatedBy", fields: [createdBy], references: [userId])
+  enquiryLines     EnquiryLine[]
+  quotations       Quotation[]
+  timelines        EnquiryTimeline[]
+  feasibilityStudy FeasibilityStudy?
 
   @@map("enquiries")
 }
 
 // 7. Enquiry Lines Model
-enum SuggestedMachine {
-  Press_1000T      @map("1000T Press")
-  Belt_Hammer_075T @map("0.75T Belt Hammer")
-  TBD
+enum SupplyType {
+  With_Material @map("With Material")
+  Labour
+}
+
+enum DeliveryState {
+  As_Forged @map("As Forged")
+  Machined
+}
+
+enum LineStatus {
+  Pending_Feasibility @map("Pending Feasibility")
+  Assessed
+  Quoted
+  Dropped
 }
 
 model EnquiryLine {
-  lineId                Int               @id @default(autoincrement()) @map("line_id")
-  enquiryId             Int               @map("enquiry_id")
-  partId                Int               @map("part_id")
-  feasibilityId         Int?              @map("feasibility_id")
-  qtyPerMonth           Int?              @map("qty_per_month")
-  qtyPerYear            Int?              @map("qty_per_year")
-  suggestedMachine      SuggestedMachine? @map("suggested_machine")
-  heatTreatmentRequired Boolean           @default(false) @map("heat_treatment_required")
-  heatTreatmentSpec     String?           @map("heat_treatment_spec") @db.VarChar(200)
-  specialRequirements   String?           @map("special_requirements") @db.Text
-  lineRemarks           String?           @map("line_remarks") @db.Text
+  lineId              Int            @id @default(autoincrement()) @map("enquiry_line_id")
+  enquiryId           Int            @map("enquiry_id")
+  lineNumber          Int            @map("line_number")
+  partId              Int            @map("part_id")
+  supplyType          SupplyType     @map("supply_type")
+  qtyPerMonth         Int?           @map("qty_per_month")
+  // Generated column (qty_per_month * 12) STORED — added via raw SQL in the migration, not writable through Prisma Client.
+  qtyPerYear          Int?           @map("qty_per_year")
+  suggestedMachineId  Int?           @map("suggested_machine_id")
+  deliveryState       DeliveryState? @map("delivery_state")
+  specialRequirements String?        @map("special_requirements") @db.Text
+  lineRemarks         String?        @map("line_remarks") @db.Text
+  lineStatus          LineStatus?    @default(Pending_Feasibility) @map("line_status")
 
-  enquiry               Enquiry           @relation(fields: [enquiryId], references: [enquiryId], onDelete: Cascade)
-  part                  Part              @relation(fields: [partId], references: [partId], onDelete: Cascade)
-  feasibilityStudy      FeasibilityStudy? @relation(fields: [feasibilityId], references: [feasibilityId], onDelete: Cascade)
+  enquiry          Enquiry           @relation(fields: [enquiryId], references: [enquiryId], onDelete: Cascade)
+  part             Part              @relation(fields: [partId], references: [partId])
+  suggestedMachine Machine?          @relation(fields: [suggestedMachineId], references: [machineId])
+  attachments      PartAttachment[]
+  feasibilityLines FeasibilityLine[]
 
+  @@unique([enquiryId, lineNumber], map: "uk_enquiry_line")
   @@map("enquiry_lines")
 }
 
@@ -217,27 +315,100 @@ enum QuotationStatus {
   Accepted
   Rejected
   Revised
+  Expired
 }
 
 model Quotation {
-  quotationId      Int              @id @default(autoincrement()) @map("quotation_id")
-  enquiryId        Int              @map("enquiry_id")
-  quotationNumber  String           @unique @map("quotation_number") @db.VarChar(20)
-  quotationDate    DateTime?        @map("quotation_date") @db.Date
-  validUntil       DateTime?        @map("valid_until") @db.Date
-  preparedBy       String?          @map("prepared_by") @db.VarChar(100)
-  totalQuotedValue Decimal?         @map("total_quoted_value") @db.Decimal(14, 2)
-  paymentTerms     String?          @map("payment_terms") @db.VarChar(100)
-  deliveryTerms    String?          @map("delivery_terms") @db.VarChar(100)
-  quotationStatus  QuotationStatus? @map("quotation_status")
-  sentOn           DateTime?        @map("sent_on") @db.Date
-  customerFeedback String?          @map("customer_feedback") @db.Text
-  createdAt        DateTime         @default(now()) @map("created_at") @db.Timestamp
-  updatedAt        DateTime         @updatedAt @map("updated_at") @db.Timestamp
+  quotationId       Int             @id @default(autoincrement()) @map("quotation_id")
+  quotationNumber   String          @map("quotation_number") @db.VarChar(20)
+  studyId           Int             @map("study_id")
+  enquiryId         Int             @map("enquiry_id")
+  customerId        Int             @map("customer_id")
+  revisionNo        Int             @default(1) @map("revision_no")
+  quotationDate     DateTime        @map("quotation_date") @db.Date
+  validUntil        DateTime?       @map("valid_until") @db.Date
+  preparedBy        Int?            @map("prepared_by")
 
-  enquiry          Enquiry          @relation(fields: [enquiryId], references: [enquiryId], onDelete: Cascade)
+  quotationStatus   QuotationStatus @default(Draft) @map("quotation_status")
+  sentOn            DateTime?       @map("sent_on") @db.Date
+  acceptedOn        DateTime?       @map("accepted_on") @db.Date
+  rejectedOn        DateTime?       @map("rejected_on") @db.Date
 
+  paymentTerms      String?         @map("payment_terms") @db.VarChar(100)
+  deliveryTerms     String?         @map("delivery_terms") @db.VarChar(100)
+
+  totalMonthlyValue Decimal?        @map("total_monthly_value") @db.Decimal(14, 2)
+  annualEstimate    Decimal?        @map("annual_estimate") @db.Decimal(14, 2)
+  customerFeedback  String?         @map("customer_feedback") @db.Text
+
+  createdAt         DateTime        @default(now()) @map("created_at") @db.Timestamp
+  updatedAt         DateTime        @updatedAt @map("updated_at") @db.Timestamp
+
+  study             FeasibilityStudy @relation(fields: [studyId], references: [studyId])
+  enquiry           Enquiry          @relation(fields: [enquiryId], references: [enquiryId])
+  customer          Customer         @relation(fields: [customerId], references: [customerId])
+  preparedByUser    User?            @relation(fields: [preparedBy], references: [userId])
+
+  quotationLines    QuotationLine[]
+
+  @@unique([quotationNumber, revisionNo], map: "uk_quotation_revision")
   @@map("quotations")
+}
+
+// 8b. Quotation Lines Model (print snapshot)
+model QuotationLine {
+  quotationLineId   Int @id @default(autoincrement()) @map("quotation_line_id")
+  quotationId       Int @map("quotation_id")
+  lineNumber        Int @map("line_number")
+  feasibilityLineId Int @map("feasibility_line_id")
+
+  partName          String  @map("part_name") @db.VarChar(150)
+  partDrawingNumber String? @map("part_drawing_number") @db.VarChar(50)
+  materialGrade     String? @map("material_grade") @db.VarChar(50)
+  processesText     String? @map("processes_text") @db.VarChar(200)
+
+  rmDiameterMm    Decimal? @map("rm_diameter_mm") @db.Decimal(6, 2)
+  forgingYieldPct Decimal? @map("forging_yield_pct") @db.Decimal(5, 2)
+  forgingWeightKg Decimal? @map("forging_weight_kg") @db.Decimal(8, 3)
+  cutPcWeightKg   Decimal? @map("cut_pc_weight_kg") @db.Decimal(8, 3)
+  grossWeightKg   Decimal? @map("gross_weight_kg") @db.Decimal(8, 3)
+
+  rmRatePerKg             Decimal? @map("rm_rate_per_kg") @db.Decimal(10, 2)
+  dieFactorPerPc          Decimal? @map("die_factor_per_pc") @db.Decimal(10, 2)
+  cuttingCostFactorPerCm2 Decimal? @map("cutting_cost_factor_per_cm2") @db.Decimal(10, 4)
+  forgingConversionPerKg  Decimal? @map("forging_conversion_per_kg") @db.Decimal(10, 2)
+  htFactorPerKg           Decimal? @map("ht_factor_per_kg") @db.Decimal(10, 2)
+  visualInspectionPerPc   Decimal? @map("visual_inspection_per_pc") @db.Decimal(10, 2)
+  rejectionFactorPct      Decimal? @map("rejection_factor_pct") @db.Decimal(5, 2)
+  iccFactorPct            Decimal? @map("icc_factor_pct") @db.Decimal(5, 2)
+  transportationFactorPct Decimal? @map("transportation_factor_pct") @db.Decimal(5, 2)
+  profitOnVaFactorPct     Decimal? @map("profit_on_va_factor_pct") @db.Decimal(5, 2)
+  scrapFactorPerKg        Decimal? @map("scrap_factor_per_kg") @db.Decimal(10, 2)
+
+  rmCost                Decimal? @map("rm_cost") @db.Decimal(12, 2)
+  cuttingCost           Decimal? @map("cutting_cost") @db.Decimal(12, 2)
+  forgingConversionCost Decimal? @map("forging_conversion_cost") @db.Decimal(12, 2)
+  htShotblastCost       Decimal? @map("ht_shotblast_cost") @db.Decimal(12, 2)
+  visualInspectionCost  Decimal? @map("visual_inspection_cost") @db.Decimal(12, 2)
+  valueAddition         Decimal? @map("value_addition") @db.Decimal(12, 2)
+  subTotal              Decimal? @map("sub_total") @db.Decimal(12, 2)
+  rejectionCost         Decimal? @map("rejection_cost") @db.Decimal(12, 2)
+  iccCost               Decimal? @map("icc_cost") @db.Decimal(12, 2)
+  transportationCost    Decimal? @map("transportation_cost") @db.Decimal(12, 2)
+  profitOnVa            Decimal? @map("profit_on_va") @db.Decimal(12, 2)
+  scrapAmount           Decimal? @map("scrap_amount") @db.Decimal(12, 2)
+  costPerPc             Decimal? @map("cost_per_pc") @db.Decimal(12, 2)
+
+  qtyPerMonth      Int?     @map("qty_per_month")
+  monthlyValue     Decimal? @map("monthly_value") @db.Decimal(14, 2)
+  developmentCost  Decimal? @map("development_cost") @db.Decimal(12, 2)
+
+  quotation       Quotation       @relation(fields: [quotationId], references: [quotationId], onDelete: Cascade)
+  feasibilityLine FeasibilityLine @relation(fields: [feasibilityLineId], references: [feasibilityLineId])
+
+  @@unique([quotationId, lineNumber], map: "uk_quotation_line")
+  @@unique([quotationId, feasibilityLineId], map: "uk_quotation_feasline")
+  @@map("quotation_lines")
 }
 
 // 9. Enquiry Timeline Model
@@ -280,21 +451,52 @@ model Machine {
   capacityTons         Decimal?      @map("capacity_tons") @db.Decimal(8, 2)
   availableHrsPerDay   Decimal?      @map("available_hrs_per_day") @db.Decimal(4, 2)
   workingDaysPerMonth  Int?          @map("working_days_per_month")
+  // Generated column (available_hrs_per_day * working_days_per_month) STORED — added via raw SQL in the migration, not writable through Prisma Client.
   availableHrsPerMonth Decimal?      @map("available_hrs_per_month") @db.Decimal(8, 2)
-  status               MachineStatus
+  status               MachineStatus @default(Active)
+
+  enquiryLines         EnquiryLine[]
+  feasibilityLines     FeasibilityLine[]
 
   @@map("machines")
 }
 
-// 11. Users Model (for OAuth)
+// 11. Users Model
+enum UserRole {
+  Sales
+  Engineering
+  Costing
+  Admin
+}
+
 model User {
-  id        Int      @id @default(autoincrement())
-  email     String   @unique
-  firstName String?  @map("first_name") @db.VarChar(100)
-  lastName  String?  @map("last_name") @db.VarChar(100)
-  picture   String?  @db.Text
+  userId    Int      @id @default(autoincrement()) @map("user_id")
+  fullName  String   @map("full_name") @db.VarChar(100)
+  email     String?  @unique @db.VarChar(100)
+  role      UserRole
+  isActive  Boolean  @default(true) @map("is_active")
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamp
 
+  uploadedAttachments        PartAttachment[]
+  receivedEnquiries          Enquiry[]          @relation("EnquiryReceivedBy")
+  createdEnquiries           Enquiry[]          @relation("EnquiryCreatedBy")
+  assessedFeasibilityStudies FeasibilityStudy[] @relation("FeasibilityAssessedBy")
+  reviewedFeasibilityStudies FeasibilityStudy[] @relation("FeasibilityReviewedBy")
+  preparedQuotations         Quotation[]
+
   @@map("users")
+}
+
+// 12. Processes Model
+model Process {
+  processId    Int     @id @default(autoincrement()) @map("process_id")
+  processCode  String  @unique @map("process_code") @db.VarChar(30)
+  processName  String  @map("process_name") @db.VarChar(60)
+  displayOrder Int     @default(0) @map("display_order")
+  isActive     Boolean @default(true) @map("is_active")
+
+  feasibilityLines FeasibilityLineProcess[]
+
+  @@map("processes")
 }
 

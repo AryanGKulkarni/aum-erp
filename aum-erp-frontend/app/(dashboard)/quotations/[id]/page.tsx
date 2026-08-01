@@ -1,27 +1,61 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { flushSync } from "react-dom";
 import { useParams, useRouter } from "next/navigation";
+import html2canvas from "html2canvas";
+import jsPDF from "jspdf";
 import Box from "@mui/joy/Box";
 import Typography from "@mui/joy/Typography";
 import Button from "@mui/joy/Button";
 import Input from "@mui/joy/Input";
 import Textarea from "@mui/joy/Textarea";
 import Chip from "@mui/joy/Chip";
-import Divider from "@mui/joy/Divider";
 import CircularProgress from "@mui/joy/CircularProgress";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import CheckIcon from "@mui/icons-material/Check";
 import SendOutlinedIcon from "@mui/icons-material/SendOutlined";
-import { getQuotationDetail, updateQuotation } from "@/services/api_service";
+import PrintOutlinedIcon from "@mui/icons-material/PrintOutlined";
+import { getQuotationDetail, updateQuotation, type QuotationDetail, type QuotationLineDetail } from "@/services/api_service";
+
+// ── company letterhead (own company profile — not customer data) ──────────────
+
+const COMPANY = {
+  name: "Austenite Metalworx Pvt. Ltd.",
+  addressLine1: "Gat No-262 Kharabwadi, Somanshi Estate,",
+  addressLine2: "Chakan, Khed, Pune – 410501, Maharashtra",
+  cin: "U25910PN2023PTC225784",
+  gst: "27AAZCA7158H1ZY",
+  pan: "AAZCA7158H",
+  udyam: "MH-26-0684184",
+  web: "www.aumworx.in",
+  bankName: "ICICI Bank, Chakan Branch",
+  accountNo: "050805007781",
+  ifsc: "ICIC0000508",
+};
+
+const TERMS = [
+  "Prices quoted are exclusive of GST. Applicable taxes will be charged extra as per government norms.",
+  "Tooling / die development costs, if any, are billed separately per the agreed amortisation schedule.",
+  "Delivery timeline subject to confirmation at order placement based on prevailing machine load.",
+  "This quotation is valid subject to raw material availability at the time of order placement.",
+];
+
+const HEADER_GRADIENT = "linear-gradient(90deg, #1E3A6E 0%, #3A5C93 100%)";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Raw = any;
+function n(v: string | number | null | undefined): number {
+  if (v === null || v === undefined) return 0;
+  return typeof v === "number" ? v : parseFloat(v) || 0;
+}
 
-function inr(v: number) {
-  return `₹${v.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+function inr(v: string | number | null | undefined) {
+  return `₹${n(v).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function num(v: string | number | null | undefined, decimals = 2) {
+  return n(v).toLocaleString("en-IN", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 }
 
 function fmtDate(d: string | null) {
@@ -29,18 +63,225 @@ function fmtDate(d: string | null) {
   return new Date(d).toLocaleDateString("en-IN", { year: "numeric", month: "2-digit", day: "2-digit" });
 }
 
-function machineName(m: string | null) {
-  if (!m) return "—";
-  if (m === "Press_1000T") return "1000T Press";
-  if (m === "Belt_Hammer_075T") return "0.75T Belt Hammer";
-  return m;
+// Slices a tall canvas into PDF pages using the real section boundaries (header,
+// each part card, price summary, terms) so a card that doesn't fully fit on the
+// current page is pushed whole onto the next one instead of being cut in half.
+// Falls back to a hard cut only if a single section is taller than one page.
+function findPdfPageBreaks(totalHeight: number, pageHeightPx: number, sectionBoundaries: number[]): number[] {
+  if (totalHeight <= pageHeightPx) return [totalHeight];
+
+  const boundaries = Array.from(new Set([...sectionBoundaries, totalHeight])).sort((a, b) => a - b);
+  const breaks: number[] = [];
+  let cursor = 0;
+
+  while (cursor < totalHeight) {
+    const naiveEnd = cursor + pageHeightPx;
+    if (naiveEnd >= totalHeight) {
+      breaks.push(totalHeight);
+      break;
+    }
+
+    let snap = -1;
+    for (const b of boundaries) {
+      if (b > cursor && b <= naiveEnd) snap = b;
+    }
+
+    if (snap > cursor) {
+      // Only defer to the section boundary if the section starting right
+      // after it actually fits on a fresh page — otherwise it's going to
+      // need splitting anyway, so snapping early just wastes page space.
+      const nextBoundary = boundaries.find((b) => b > snap) ?? totalHeight;
+      const nextSectionHeight = nextBoundary - snap;
+      breaks.push(nextSectionHeight <= pageHeightPx ? snap : naiveEnd);
+    } else {
+      breaks.push(naiveEnd);
+    }
+    cursor = breaks[breaks.length - 1];
+  }
+
+  return breaks;
 }
 
 const STATUS_ORDER = ["Draft", "Sent", "Accepted"];
 const NEXT_ACTION: Record<string, { label: string; nextStatus: string }> = {
   Draft: { label: "Mark as Sent", nextStatus: "Sent" },
-  Sent:  { label: "Mark as Accepted", nextStatus: "Accepted" },
+  Sent: { label: "Mark as Accepted", nextStatus: "Accepted" },
 };
+
+// ── small building blocks ───────────────────────────────────────────────────────
+
+function SpecRow({ label, value }: { label: string; value: string }) {
+  return (
+    <Box sx={{ display: "flex", justifyContent: "space-between", py: 0.75, borderBottom: "1px solid", borderColor: "neutral.100" }}>
+      <Typography level="body-sm" sx={{ color: "neutral.500" }}>{label}</Typography>
+      <Typography level="body-sm" fontWeight="lg">{value}</Typography>
+    </Box>
+  );
+}
+
+function BreakdownRow({ label, value, muted = false }: { label: string; value: string; muted?: boolean }) {
+  return (
+    <Box sx={{ display: "flex", justifyContent: "space-between", py: 0.5, pl: muted ? 1.5 : 0 }}>
+      <Typography level="body-sm" sx={{ color: "neutral.500" }}>{label}</Typography>
+      <Typography level="body-sm" sx={{ color: muted ? "primary.600" : "neutral.700" }}>{value}</Typography>
+    </Box>
+  );
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <Box sx={{ px: 2.5, py: 0.75, backgroundColor: "neutral.100" }}>
+      <Typography level="body-xs" fontWeight="lg" sx={{ color: "neutral.600", letterSpacing: "0.06em" }}>
+        {children}
+      </Typography>
+    </Box>
+  );
+}
+
+// ── part card ─────────────────────────────────────────────────────────────────
+
+function PartCard({ line, index }: { line: QuotationLineDetail; index: number }) {
+  const processes = (line.processesText ?? "").split(",").map((p) => p.trim()).filter(Boolean);
+
+  return (
+    <Box data-pdf-section sx={{ border: "1px solid", borderColor: "neutral.200", borderRadius: "lg", overflow: "hidden", mb: 2.5, backgroundColor: "background.surface" }}>
+      {/* header */}
+      <Box sx={{ background: HEADER_GRADIENT, color: "white", p: 2.5 }}>
+        <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <Box sx={{ display: "flex", gap: 1.25, alignItems: "baseline" }}>
+            <Typography sx={{ color: "rgba(255,255,255,0.55)", fontWeight: 800, fontSize: 20 }}>
+              {String(index + 1).padStart(2, "0")}
+            </Typography>
+            <Box>
+              <Typography level="title-md" sx={{ color: "white", fontWeight: "xl" }}>{line.partName}</Typography>
+              <Typography level="body-xs" sx={{ color: "rgba(255,255,255,0.7)", mt: 0.25 }}>
+                {line.partDrawingNumber ?? "—"} · {line.materialGrade ?? "—"}
+              </Typography>
+            </Box>
+          </Box>
+          <Box sx={{ textAlign: "right", flexShrink: 0 }}>
+            <Typography level="body-xs" sx={{ color: "rgba(255,255,255,0.6)", letterSpacing: "0.06em" }}>COST / PC</Typography>
+            <Typography level="h4" sx={{ color: "white", fontWeight: "xl" }}>{inr(line.costPerPc)}</Typography>
+            <Typography level="body-xs" sx={{ color: "rgba(255,255,255,0.6)" }}>
+              {(line.qtyPerMonth ?? 0).toLocaleString("en-IN")} pcs/mo · {inr(line.monthlyValue)}/mo
+            </Typography>
+          </Box>
+        </Box>
+        {processes.length > 0 && (
+          <Box sx={{ display: "flex", gap: 1, mt: 1.5, flexWrap: "wrap" }}>
+            {processes.map((p) => (
+              <Chip
+                key={p}
+                size="sm"
+                variant="soft"
+                sx={{ backgroundColor: "rgba(255,255,255,0.15)", color: "white" }}
+              >
+                {p}
+              </Chip>
+            ))}
+          </Box>
+        )}
+      </Box>
+
+      {/* body */}
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" } }}>
+        {/* left: specifications + rate factors */}
+        <Box sx={{ py: 2.5, borderRight: { md: "1px solid" }, borderColor: { md: "neutral.100" }, borderBottom: { xs: "1px solid", md: "none" } }}>
+          <SectionLabel>SPECIFICATIONS</SectionLabel>
+          <Box sx={{ px: 2.5, pt: 0.75 }}>
+            <SpecRow label="RM Diameter" value={`${num(line.rmDiameterMm, 0)} mm`} />
+            <SpecRow label="Forging Yield" value={`${num(line.forgingYieldPct, 0)}%`} />
+            <SpecRow label="Forging Weight" value={`${num(line.forgingWeightKg, 3)} kg`} />
+            <SpecRow label="Cut PC Weight" value={`${num(line.cutPcWeightKg, 3)} kg`} />
+            <SpecRow label="Gross Weight" value={`${num(line.grossWeightKg, 3)} kg`} />
+          </Box>
+
+          <Box sx={{ mt: 1.25 }}>
+            <SectionLabel>RATE FACTORS</SectionLabel>
+            <Box sx={{ px: 2.5, pt: 0.75 }}>
+              <SpecRow label="RM Base Rate" value={`${inr(line.rmRatePerKg)}/kg`} />
+              <SpecRow label="Die Factor" value={`${inr(line.dieFactorPerPc)}/pc`} />
+              <SpecRow label="Cutting" value={`${inr(line.cuttingCostFactorPerCm2)}/cm²`} />
+              <SpecRow label="Finish Forging" value={`${inr(line.forgingConversionPerKg)}/kg`} />
+              <SpecRow label="H&T" value={`${inr(line.htFactorPerKg)}/kg`} />
+              <SpecRow label="Rejection" value={`${num(line.rejectionFactorPct, 0)}%`} />
+              <SpecRow label="ICC" value={`${num(line.iccFactorPct, 0)}%`} />
+              <SpecRow label="Transportation" value={`${num(line.transportationFactorPct, 0)}%`} />
+              <SpecRow label="Profit on VA" value={`${num(line.profitOnVaFactorPct, 0)}%`} />
+              <SpecRow label="Scrap" value={`${inr(line.scrapFactorPerKg)}/kg`} />
+            </Box>
+          </Box>
+        </Box>
+
+        {/* right: cost breakdown */}
+        <Box sx={{ py: 2.5 }}>
+          <SectionLabel>COST BREAKDOWN</SectionLabel>
+
+          <Box sx={{ mt: 1, px: 2.5, py: 0.6, backgroundColor: "primary.50" }}>
+            <Typography level="body-xs" fontWeight="lg" sx={{ color: "primary.700", letterSpacing: "0.05em" }}>
+              RAW MATERIAL
+            </Typography>
+          </Box>
+          <Box sx={{ px: 2.5, pt: 0.75 }}>
+            <BreakdownRow label="RM Cost" value={inr(line.rmCost)} />
+          </Box>
+
+          <Box sx={{ mt: 1.25, px: 2.5, py: 0.6, backgroundColor: "primary.50" }}>
+            <Typography level="body-xs" fontWeight="lg" sx={{ color: "primary.700", letterSpacing: "0.05em" }}>
+              VALUE ADDITION
+            </Typography>
+          </Box>
+          <Box sx={{ px: 2.5, pt: 0.75 }}>
+            <BreakdownRow label="Cutting Cost / SQ CM" value={inr(line.cuttingCost)} muted />
+            <BreakdownRow label="Finish Forging Conv." value={inr(line.forgingConversionCost)} muted />
+            <BreakdownRow label="H&T + Shot Blasting" value={inr(line.htShotblastCost)} muted />
+            <BreakdownRow label="Visual Inspection" value={inr(line.visualInspectionCost)} muted />
+            <BreakdownRow label="Die Factor" value={inr(line.dieFactorPerPc)} muted />
+            <Box sx={{ display: "flex", justifyContent: "space-between", pt: 0.75, mt: 0.5, pb: 0.75, borderTop: "1px solid", borderColor: "neutral.300" }}>
+              <Typography level="body-sm" fontWeight="lg">Value Addition</Typography>
+              <Typography level="body-sm" fontWeight="lg" sx={{ color: "primary.600" }}>{inr(line.valueAddition)}</Typography>
+            </Box>
+          </Box>
+
+          <Box sx={{ mt: 1.25, px: 2.5, py: 0.6, backgroundColor: "primary.50" }}>
+            <Typography level="body-xs" fontWeight="lg" sx={{ color: "primary.700", letterSpacing: "0.05em" }}>
+              SUB TOTAL
+            </Typography>
+          </Box>
+          <Box sx={{ display: "flex", justifyContent: "space-between", px: 2.5, py: 1, backgroundColor: "#FDF6E3" }}>
+            <Typography level="body-sm" fontWeight="lg">SUB TOTAL</Typography>
+            <Typography level="body-sm" fontWeight="lg">{inr(line.subTotal)}</Typography>
+          </Box>
+
+          <Box sx={{ mt: 1.25, px: 2.5, py: 0.6, backgroundColor: "primary.50" }}>
+            <Typography level="body-xs" fontWeight="lg" sx={{ color: "primary.700", letterSpacing: "0.05em" }}>
+              ADDITIONS
+            </Typography>
+          </Box>
+          <Box sx={{ px: 2.5, pt: 0.75, pb: 1 }}>
+            <BreakdownRow label={`Rejection (${num(line.rejectionFactorPct, 0)}%)`} value={inr(line.rejectionCost)} />
+            <BreakdownRow label={`ICC (${num(line.iccFactorPct, 0)}%)`} value={inr(line.iccCost)} />
+            <BreakdownRow label={`Transportation (${num(line.transportationFactorPct, 0)}%)`} value={inr(line.transportationCost)} />
+            <BreakdownRow label={`Profit on VA (${num(line.profitOnVaFactorPct, 0)}%)`} value={inr(line.profitOnVa)} />
+            <BreakdownRow label="Scrap" value={`-${inr(line.scrapAmount)}`} />
+          </Box>
+
+          <Box sx={{ height: 2, backgroundColor: "#1E3A6E" }} />
+
+          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", px: 2.5, py: 1.25, backgroundColor: "primary.100" }}>
+            <Typography level="title-sm" sx={{ color: "primary.700" }}>COST / PC</Typography>
+            <Typography level="title-md" fontWeight="xl" sx={{ color: "primary.700" }}>{inr(line.costPerPc)}</Typography>
+          </Box>
+
+          <Box sx={{ display: "flex", justifyContent: "space-between", px: 2.5, pt: 1 }}>
+            <Typography level="body-sm" sx={{ color: "neutral.500" }}>DEVELOPMENT COST</Typography>
+            <Typography level="body-sm" fontWeight="lg">{inr(line.developmentCost)}</Typography>
+          </Box>
+        </Box>
+      </Box>
+    </Box>
+  );
+}
 
 // ── page ──────────────────────────────────────────────────────────────────────
 
@@ -48,12 +289,14 @@ export default function QuotationDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
 
-  const [data, setData] = useState<Raw>(null);
+  const [data, setData] = useState<QuotationDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [advancing, setAdvancing] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [pdfMode, setPdfMode] = useState(false);
+  const documentRef = useRef<HTMLDivElement>(null);
 
-  // editable fields
   const [paymentTerms, setPaymentTerms] = useState("");
   const [deliveryTerms, setDeliveryTerms] = useState("");
   const [validUntil, setValidUntil] = useState("");
@@ -80,6 +323,72 @@ export default function QuotationDetailPage() {
       await load();
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleDownloadPdf() {
+    if (!documentRef.current || !data) return;
+    setDownloadingPdf(true);
+    try {
+      // Swap the live Payment/Delivery/Valid-Until inputs for flat text before
+      // capturing — flushSync forces the DOM to update synchronously so
+      // html2canvas never sees the real <input> elements.
+      flushSync(() => setPdfMode(true));
+
+      const container = documentRef.current;
+      const containerRect = container.getBoundingClientRect();
+      const sectionBoundaries = Array.from(
+        container.querySelectorAll<HTMLElement>("[data-pdf-section]"),
+      ).map((el) => el.getBoundingClientRect().bottom - containerRect.top);
+
+      const canvas = await html2canvas(container, {
+        scale: 2,
+        backgroundColor: "#ffffff",
+        useCORS: true,
+      });
+
+      flushSync(() => setPdfMode(false));
+
+      const pdf = new jsPDF("p", "pt", "a4");
+      const marginPt = 24;
+      const pageWidthPt = pdf.internal.pageSize.getWidth();
+      const pageHeightPt = pdf.internal.pageSize.getHeight();
+      const contentWidthPt = pageWidthPt - marginPt * 2;
+      const contentHeightPt = pageHeightPt - marginPt * 2;
+
+      // Two different ratios are needed here: html2canvas rasterizes the DOM
+      // (CSS px) into a higher-resolution canvas (canvas px), and jsPDF then
+      // places that canvas into a page measured in points (pt) — CSS px and pt
+      // are not the same unit, so these must not be conflated.
+      const domPxToCanvasPx = canvas.width / containerRect.width;
+      const canvasPxToPt = contentWidthPt / canvas.width;
+
+      const pageHeightPx = contentHeightPt / canvasPxToPt;
+      const canvasBoundaries = sectionBoundaries.map((b) => Math.round(b * domPxToCanvasPx));
+      const breaks = findPdfPageBreaks(canvas.height, pageHeightPx, canvasBoundaries);
+
+      let sliceStartPx = 0;
+      breaks.forEach((sliceEndPx, i) => {
+        const sliceHeightPx = sliceEndPx - sliceStartPx;
+        if (sliceHeightPx <= 0) return;
+
+        const sliceCanvas = document.createElement("canvas");
+        sliceCanvas.width = canvas.width;
+        sliceCanvas.height = sliceHeightPx;
+        const ctx = sliceCanvas.getContext("2d")!;
+        ctx.drawImage(canvas, 0, sliceStartPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx);
+
+        const sliceHeightPt = sliceHeightPx * canvasPxToPt;
+        if (i > 0) pdf.addPage();
+        pdf.addImage(sliceCanvas.toDataURL("image/png"), "PNG", marginPt, marginPt, contentWidthPt, sliceHeightPt);
+
+        sliceStartPx = sliceEndPx;
+      });
+
+      pdf.save(`${data.quotationNumber}.pdf`);
+    } finally {
+      setPdfMode(false);
+      setDownloadingPdf(false);
     }
   }
 
@@ -112,28 +421,12 @@ export default function QuotationDetailPage() {
   }
   if (!data) return null;
 
-  // ── derived ──────────────────────────────────────────────────────────────────
-  const status: string = data.quotationStatus ?? "Draft";
+  const status = data.quotationStatus ?? "Draft";
   const statusIdx = STATUS_ORDER.indexOf(status);
   const nextAction = NEXT_ACTION[status];
-  const enquiry = data.enquiry;
 
-  const rows = (enquiry?.enquiryLines ?? []).map((line: Raw) => {
-    const unitPrice = parseFloat(line.feasibilityStudy?.costEstimations?.[0]?.quotedPricePerPc ?? "0") || 0;
-    const qty = line.qtyPerMonth ?? 0;
-    return {
-      partName: line.part?.partName ?? "—",
-      drawingNo: line.part?.partDrawingNumber ?? "—",
-      material: line.part?.materialGrade ?? "—",
-      machine: machineName(line.suggestedMachine ?? line.feasibilityStudy?.recommendedMachine ?? null),
-      qty,
-      unitPrice,
-      monthly: unitPrice * qty,
-    };
-  });
-
-  const totalMonthly = rows.reduce((s: number, r: Raw) => s + r.monthly, 0);
-  const totalAnnual = totalMonthly * 12;
+  const totalMonthly = data.quotationLines.reduce((s, l) => s + n(l.monthlyValue), 0);
+  const totalAnnual = n(data.annualEstimate) || totalMonthly * 12;
 
   const inputSx = { backgroundColor: "background.surface", minWidth: 0 };
 
@@ -178,172 +471,235 @@ export default function QuotationDetailPage() {
             );
           })}
         </Box>
-        {nextAction && (
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
           <Button
-            color="primary"
-            loading={advancing}
-            startDecorator={<SendOutlinedIcon style={{ fontSize: 16 }} />}
-            onClick={handleAdvanceStatus}
+            variant="outlined"
+            color="neutral"
+            loading={downloadingPdf}
+            startDecorator={<PrintOutlinedIcon style={{ fontSize: 16 }} />}
+            onClick={handleDownloadPdf}
           >
-            {nextAction.label}
+            Print / PDF
           </Button>
-        )}
-        {status === "Accepted" && (
-          <Chip color="success" variant="soft" size="lg">Accepted</Chip>
-        )}
+          {nextAction && (
+            <Button
+              color="primary"
+              loading={advancing}
+              startDecorator={<SendOutlinedIcon style={{ fontSize: 16 }} />}
+              onClick={handleAdvanceStatus}
+            >
+              {nextAction.label}
+            </Button>
+          )}
+          {status === "Accepted" && (
+            <Chip color="success" variant="soft" size="lg">Accepted</Chip>
+          )}
+        </Box>
       </Box>
 
-      {/* ── Quotation Document ── */}
-      <Box sx={{ border: "1px solid", borderColor: "neutral.200", borderRadius: "lg", backgroundColor: "background.surface", mb: 3, overflow: "hidden" }}>
-        <Box sx={{ p: 3 }}>
-          {/* Company header */}
-          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", mb: 3 }}>
+      {/* ── Quotation document: outer panel grouping the header, part cards, price summary & terms ── */}
+      <Box ref={documentRef} sx={{ border: "1px solid", borderColor: "neutral.200", borderRadius: "lg", backgroundColor: "neutral.50", overflow: "hidden", mb: 3 }}>
+        <Box data-pdf-section sx={{ background: HEADER_GRADIENT, color: "white", p: 3, position: "relative" }}>
+          <Typography
+            sx={{
+              position: "absolute", top: 10, right: 28, fontSize: 26, fontWeight: 800,
+              letterSpacing: "0.08em", color: "rgba(255,255,255,0.08)", whiteSpace: "nowrap", lineHeight: 1,
+            }}
+          >
+            QUOTATION
+          </Typography>
+
+          <Box sx={{ position: "relative", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
             <Box sx={{ display: "flex", gap: 1.5, alignItems: "flex-start" }}>
-              <Box sx={{ width: 40, height: 40, borderRadius: "sm", backgroundColor: "primary.500", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                <Typography sx={{ color: "white", fontWeight: "xl", fontSize: 12 }}>ERP</Typography>
+              <Box
+                sx={{
+                  width: 42, height: 42, borderRadius: "sm", flexShrink: 0,
+                  backgroundColor: "white", border: "1px solid rgba(255,255,255,0.25)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  overflow: "hidden", p: "3px",
+                }}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/images/logo.jpg"
+                  alt="Company logo"
+                  style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                />
               </Box>
               <Box>
-                <Typography level="title-md" fontWeight="xl">NexusERP Pvt. Ltd.</Typography>
-                <Typography level="body-xs" sx={{ color: "neutral.500" }}>Plot 14, MIDC Industrial Area, Pune – 411 019</Typography>
-                <Typography level="body-xs" sx={{ color: "neutral.500" }}>GST: 27AABCN1234F1Z5 · sales@nexuserp.in</Typography>
+                <Typography level="title-md" sx={{ color: "white", fontWeight: "xl" }}>{COMPANY.name}</Typography>
+                <Typography level="body-xs" sx={{ color: "rgba(255,255,255,0.75)" }}>{COMPANY.addressLine1}</Typography>
+                <Typography level="body-xs" sx={{ color: "rgba(255,255,255,0.75)" }}>{COMPANY.addressLine2}</Typography>
               </Box>
             </Box>
             <Box sx={{ textAlign: "right" }}>
-              <Typography level="h2" sx={{ color: "primary.600", letterSpacing: "0.05em", fontWeight: "xl" }}>QUOTATION</Typography>
-              <Typography level="title-sm" fontWeight="lg">{data.quotationNumber}</Typography>
-              <Chip size="sm" variant="soft" color={status === "Draft" ? "warning" : status === "Sent" ? "primary" : status === "Accepted" ? "success" : "danger"} sx={{ mt: 0.5 }}>
-                {status}
-              </Chip>
+              <Typography level="title-md" fontWeight="lg" sx={{ color: "white" }}>{data.quotationNumber}</Typography>
             </Box>
           </Box>
 
-          {/* Info bar */}
-          <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 2, py: 2, borderTop: "1px solid", borderBottom: "1px solid", borderColor: "neutral.100", mb: 3 }}>
+          <Box sx={{ position: "relative", display: "flex", flexWrap: "wrap", gap: 2, mt: 2 }}>
+            <Typography level="body-xs" sx={{ color: "rgba(255,255,255,0.65)" }}>CIN: {COMPANY.cin}</Typography>
+            <Typography level="body-xs" sx={{ color: "rgba(255,255,255,0.65)" }}>GST: {COMPANY.gst}</Typography>
+            <Typography level="body-xs" sx={{ color: "rgba(255,255,255,0.65)" }}>PAN: {COMPANY.pan}</Typography>
+            <Typography level="body-xs" sx={{ color: "rgba(255,255,255,0.65)" }}>Udyam: {COMPANY.udyam}</Typography>
+          </Box>
+          <Typography level="body-xs" sx={{ position: "relative", color: "rgba(255,255,255,0.65)", mt: 0.5 }}>
+            Web: {COMPANY.web}
+          </Typography>
+
+          <Box sx={{ position: "relative", display: "grid", gridTemplateColumns: { xs: "1fr 1fr", sm: "1fr 1fr 1fr 1fr" }, gap: 2, mt: 2.5, pt: 2, borderTop: "1px solid rgba(255,255,255,0.15)" }}>
             <Box>
-              <Typography level="body-xs" sx={{ color: "neutral.400", mb: 0.5 }}>TO</Typography>
-              <Typography level="body-sm" fontWeight="lg">{enquiry?.customer?.companyName ?? "—"}</Typography>
+              <Typography level="body-xs" sx={{ color: "rgba(255,255,255,0.55)", letterSpacing: "0.05em" }}>BILL TO</Typography>
+              <Typography level="body-sm" fontWeight="lg" sx={{ color: "white", mt: 0.5 }}>{data.customer?.companyName ?? "—"}</Typography>
             </Box>
             <Box>
-              <Typography level="body-xs" sx={{ color: "neutral.400", mb: 0.5 }}>REF. ENQUIRY</Typography>
+              <Typography level="body-xs" sx={{ color: "rgba(255,255,255,0.55)", letterSpacing: "0.05em" }}>REF. ENQUIRY</Typography>
               <Typography
                 level="body-sm" fontWeight="lg"
-                sx={{ color: "primary.500", cursor: "pointer", "&:hover": { textDecoration: "underline" } }}
-                onClick={() => enquiry?.enquiryId && router.push(`/enquiries/${enquiry.enquiryId}`)}
+                sx={{ color: "white", mt: 0.5, cursor: data.enquiry ? "pointer" : "default", "&:hover": data.enquiry ? { textDecoration: "underline" } : undefined }}
+                onClick={() => data.enquiry && router.push(`/enquiries/${data.enquiry.enquiryId}`)}
               >
-                {enquiry?.enquiryNumber ?? "—"}
+                {data.enquiry?.enquiryNumber ?? "—"}
               </Typography>
             </Box>
             <Box>
-              <Typography level="body-xs" sx={{ color: "neutral.400", mb: 0.5 }}>DATE</Typography>
-              <Typography level="body-sm" fontWeight="lg">{fmtDate(data.quotationDate)}</Typography>
+              <Typography level="body-xs" sx={{ color: "rgba(255,255,255,0.55)", letterSpacing: "0.05em" }}>DATE</Typography>
+              <Typography level="body-sm" fontWeight="lg" sx={{ color: "white", mt: 0.5 }}>{fmtDate(data.quotationDate)}</Typography>
             </Box>
             <Box>
-              <Typography level="body-xs" sx={{ color: "neutral.400", mb: 0.5 }}>VALID UNTIL</Typography>
-              <Typography level="body-sm" fontWeight="lg">{fmtDate(data.validUntil)}</Typography>
+              <Typography level="body-xs" sx={{ color: "rgba(255,255,255,0.55)", letterSpacing: "0.05em" }}>VALID UNTIL</Typography>
+              <Typography level="body-sm" fontWeight="lg" sx={{ color: "white", mt: 0.5 }}>{fmtDate(data.validUntil)}</Typography>
             </Box>
           </Box>
 
-          {/* Price Schedule */}
-          <Typography level="title-sm" fontWeight="lg" sx={{ mb: 2, letterSpacing: "0.04em" }}>
-            PRICE SCHEDULE — MONTHLY
-          </Typography>
-          <Box sx={{ overflowX: "auto" }}>
+          <Box sx={{ position: "relative", mt: 2 }}>
+            <Typography level="body-xs" sx={{ color: "rgba(255,255,255,0.55)", letterSpacing: "0.05em" }}>PREPARED BY</Typography>
+            <Typography level="body-sm" fontWeight="lg" sx={{ color: "white", mt: 0.5 }}>{data.preparedByUser?.fullName ?? "—"}</Typography>
+          </Box>
+        </Box>
+
+        {/* ── Part cards + Price Summary: inset within the outer panel's padding ── */}
+        <Box sx={{ p: 2 }}>
+        {data.quotationLines.map((line, i) => (
+          <PartCard key={line.quotationLineId} line={line} index={i} />
+        ))}
+
+        <Box data-pdf-section sx={{ border: "1px solid", borderColor: "neutral.200", borderRadius: "lg", overflow: "hidden", backgroundColor: "neutral.100" }}>
+          <Box sx={{ px: 2.5, py: 1.75, borderBottom: "1px solid", borderColor: "neutral.300" }}>
+            <Typography level="body-xs" fontWeight="lg" sx={{ color: "neutral.500", letterSpacing: "0.06em" }}>PRICE SUMMARY</Typography>
+          </Box>
+          <Box sx={{ overflowX: "auto", backgroundColor: "background.surface" }}>
             <Box component="table" sx={{ width: "100%", borderCollapse: "collapse" }}>
               <Box component="thead">
-                <Box component="tr" sx={{ backgroundColor: "neutral.50" }}>
-                  {["#", "Part Name", "Drawing No.", "Material", "Machine", "Qty/Month", "Unit Price (₹)", "Monthly Value (₹)"].map((h, i) => (
-                    <Box component="th" key={h} sx={{ px: 1.5, py: 1, textAlign: i >= 5 ? "right" : i === 0 ? "center" : "left", borderBottom: "1px solid", borderColor: "neutral.200" }}>
-                      <Typography level="body-xs" fontWeight="lg" sx={{ color: "neutral.600", letterSpacing: "0.04em" }}>{h}</Typography>
+                <Box component="tr">
+                  {["#", "Part Name", "Drawing", "Material", "Qty / Month", "Cost / PC", "Monthly Value"].map((h, i) => (
+                    <Box component="th" key={h} sx={{ px: 2, py: 1, textAlign: i >= 4 ? "right" : i === 0 ? "center" : "left", backgroundColor: "primary.50", borderBottom: "1px solid", borderColor: "neutral.200" }}>
+                      <Typography level="body-xs" fontWeight="lg" sx={{ color: "primary.700", letterSpacing: "0.03em" }}>{h}</Typography>
                     </Box>
                   ))}
                 </Box>
               </Box>
               <Box component="tbody">
-                {rows.map((row: Raw, i: number) => (
-                  <Box component="tr" key={i} sx={{ "&:hover": { backgroundColor: "neutral.50" } }}>
-                    <Box component="td" sx={{ px: 1.5, py: 1.5, textAlign: "center", borderBottom: "1px solid", borderColor: "neutral.100" }}>
+                {data.quotationLines.map((line, i) => (
+                  <Box component="tr" key={line.quotationLineId} sx={{ "&:hover": { backgroundColor: "neutral.50" } }}>
+                    <Box component="td" sx={{ px: 2, py: 1.5, textAlign: "center", borderBottom: "1px solid", borderColor: "neutral.100" }}>
                       <Typography level="body-sm" sx={{ color: "neutral.400" }}>{i + 1}</Typography>
                     </Box>
-                    <Box component="td" sx={{ px: 1.5, py: 1.5, borderBottom: "1px solid", borderColor: "neutral.100" }}>
-                      <Typography level="body-sm" fontWeight="lg">{row.partName}</Typography>
+                    <Box component="td" sx={{ px: 2, py: 1.5, borderBottom: "1px solid", borderColor: "neutral.100" }}>
+                      <Typography level="body-sm" fontWeight="lg">{line.partName}</Typography>
                     </Box>
-                    <Box component="td" sx={{ px: 1.5, py: 1.5, borderBottom: "1px solid", borderColor: "neutral.100" }}>
-                      <Typography level="body-sm" sx={{ color: "neutral.600" }}>{row.drawingNo}</Typography>
+                    <Box component="td" sx={{ px: 2, py: 1.5, borderBottom: "1px solid", borderColor: "neutral.100" }}>
+                      <Typography level="body-sm" sx={{ color: "primary.600" }}>{line.partDrawingNumber ?? "—"}</Typography>
                     </Box>
-                    <Box component="td" sx={{ px: 1.5, py: 1.5, borderBottom: "1px solid", borderColor: "neutral.100" }}>
-                      <Typography level="body-sm">{row.material}</Typography>
+                    <Box component="td" sx={{ px: 2, py: 1.5, borderBottom: "1px solid", borderColor: "neutral.100" }}>
+                      <Typography level="body-sm">{line.materialGrade ?? "—"}</Typography>
                     </Box>
-                    <Box component="td" sx={{ px: 1.5, py: 1.5, borderBottom: "1px solid", borderColor: "neutral.100" }}>
-                      <Typography level="body-sm">{row.machine}</Typography>
+                    <Box component="td" sx={{ px: 2, py: 1.5, textAlign: "right", borderBottom: "1px solid", borderColor: "neutral.100" }}>
+                      <Typography level="body-sm">{(line.qtyPerMonth ?? 0).toLocaleString("en-IN")}</Typography>
                     </Box>
-                    <Box component="td" sx={{ px: 1.5, py: 1.5, textAlign: "right", borderBottom: "1px solid", borderColor: "neutral.100" }}>
-                      <Typography level="body-sm">{row.qty.toLocaleString("en-IN")}</Typography>
+                    <Box component="td" sx={{ px: 2, py: 1.5, textAlign: "right", borderBottom: "1px solid", borderColor: "neutral.100" }}>
+                      <Typography level="body-sm">{inr(line.costPerPc)}</Typography>
                     </Box>
-                    <Box component="td" sx={{ px: 1.5, py: 1.5, textAlign: "right", borderBottom: "1px solid", borderColor: "neutral.100" }}>
-                      <Typography level="body-sm">{inr(row.unitPrice)}</Typography>
-                    </Box>
-                    <Box component="td" sx={{ px: 1.5, py: 1.5, textAlign: "right", borderBottom: "1px solid", borderColor: "neutral.100" }}>
-                      <Typography level="body-sm" fontWeight="lg" sx={{ color: "primary.600" }}>{inr(row.monthly)}</Typography>
+                    <Box component="td" sx={{ px: 2, py: 1.5, textAlign: "right", borderBottom: "1px solid", borderColor: "neutral.100" }}>
+                      <Typography level="body-sm" fontWeight="lg">{inr(line.monthlyValue)}</Typography>
                     </Box>
                   </Box>
                 ))}
               </Box>
             </Box>
           </Box>
+          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", px: 2.5, py: 1.5, background: HEADER_GRADIENT }}>
+            <Typography level="title-sm" sx={{ color: "white" }}>Total Monthly Value</Typography>
+            <Typography level="title-md" fontWeight="xl" sx={{ color: "white" }}>{inr(totalMonthly)}</Typography>
+          </Box>
+          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", px: 2.5, py: 1, backgroundColor: "primary.50" }}>
+            <Typography level="body-xs" sx={{ color: "primary.700" }}>Annual Estimate</Typography>
+            <Typography level="body-sm" sx={{ color: "primary.700" }}>{inr(totalAnnual)} / yr</Typography>
+          </Box>
+        </Box>
+        </Box>
 
-          {/* Totals */}
-          <Box sx={{ mt: 0.5, px: 1.5, py: 1.5, backgroundColor: "primary.softBg", borderRadius: "0 0 sm sm" }}>
-            <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <Typography level="title-sm" sx={{ color: "primary.700" }}>Total Monthly Value</Typography>
-              <Typography level="title-md" fontWeight="xl" sx={{ color: "primary.600" }}>{inr(totalMonthly)}</Typography>
+        {/* ── Terms & Conditions: flush with the bottom of the outer panel ── */}
+        <Box data-pdf-section sx={{ backgroundColor: "background.surface", p: 3 }}>
+          <Typography level="body-xs" fontWeight="lg" sx={{ color: "neutral.500", letterSpacing: "0.06em", mb: 2 }}>TERMS & CONDITIONS</Typography>
+
+          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr 1fr" }, gap: 2, mb: 2.5 }}>
+            <Box>
+              <Typography level="body-xs" sx={{ mb: 0.5, color: "neutral.500" }}>Payment Terms</Typography>
+              {pdfMode ? (
+                <Typography level="body-sm" fontWeight="lg">{paymentTerms || "-"}</Typography>
+              ) : (
+                <Input placeholder="e.g. 30 Days Credit" value={paymentTerms} onChange={(e) => setPaymentTerms(e.target.value)} sx={inputSx} />
+              )}
             </Box>
-            <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mt: 0.5 }}>
-              <Typography level="body-xs" sx={{ color: "neutral.500" }}>Annual Value (estimated)</Typography>
-              <Typography level="body-sm" sx={{ color: "neutral.600" }}>{inr(totalAnnual)} / year</Typography>
+            <Box>
+              <Typography level="body-xs" sx={{ mb: 0.5, color: "neutral.500" }}>Delivery Terms</Typography>
+              {pdfMode ? (
+                <Typography level="body-sm" fontWeight="lg">{deliveryTerms || "-"}</Typography>
+              ) : (
+                <Input placeholder="e.g. Ex-Works Pune" value={deliveryTerms} onChange={(e) => setDeliveryTerms(e.target.value)} sx={inputSx} />
+              )}
+            </Box>
+            <Box>
+              <Typography level="body-xs" sx={{ mb: 0.5, color: "neutral.500" }}>Valid Until</Typography>
+              {pdfMode ? (
+                <Typography level="body-sm" fontWeight="lg">{validUntil || "-"}</Typography>
+              ) : (
+                <Input type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} sx={inputSx} />
+              )}
             </Box>
           </Box>
 
-          {/* Terms & Conditions */}
-          <Divider sx={{ my: 3 }} />
-          <Typography level="title-sm" fontWeight="lg" sx={{ mb: 2, letterSpacing: "0.04em" }}>TERMS & CONDITIONS</Typography>
-          <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 2, mb: 2.5 }}>
+          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr 1fr", sm: "1fr 1fr 1fr 1fr" }, gap: 2, p: 2, borderRadius: "sm", backgroundColor: "primary.50", mb: 2 }}>
             <Box>
-              <Typography level="body-xs" sx={{ mb: 0.5, color: "neutral.600", fontWeight: 500 }}>Payment Terms</Typography>
-              <Input placeholder="e.g. 30 Days Credit" value={paymentTerms} onChange={(e) => setPaymentTerms(e.target.value)} sx={inputSx} />
+              <Typography level="body-xs" sx={{ color: "primary.700", fontWeight: 600 }}>BANK</Typography>
+              <Typography level="body-sm">{COMPANY.bankName}</Typography>
             </Box>
             <Box>
-              <Typography level="body-xs" sx={{ mb: 0.5, color: "neutral.600", fontWeight: 500 }}>Delivery Terms</Typography>
-              <Input placeholder="e.g. Ex-Works Pune" value={deliveryTerms} onChange={(e) => setDeliveryTerms(e.target.value)} sx={inputSx} />
+              <Typography level="body-xs" sx={{ color: "primary.700", fontWeight: 600 }}>ACCOUNT NO.</Typography>
+              <Typography level="body-sm">{COMPANY.accountNo}</Typography>
             </Box>
             <Box>
-              <Typography level="body-xs" sx={{ mb: 0.5, color: "neutral.600", fontWeight: 500 }}>Valid Until</Typography>
-              <Input type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} sx={inputSx} />
+              <Typography level="body-xs" sx={{ color: "primary.700", fontWeight: 600 }}>IFSC</Typography>
+              <Typography level="body-sm">{COMPANY.ifsc}</Typography>
+            </Box>
+            <Box>
+              <Typography level="body-xs" sx={{ color: "primary.700", fontWeight: 600 }}>GST NO.</Typography>
+              <Typography level="body-sm">{COMPANY.gst}</Typography>
             </Box>
           </Box>
+
           <Box sx={{ display: "flex", flexDirection: "column", gap: 0.75, mb: 3 }}>
-            {[
-              "Prices are exclusive of GST. Applicable taxes as per government norms will be charged extra.",
-              "Tooling / die costs, if any, are billed separately as per the agreed amortisation schedule.",
-              "Delivery timeline to be confirmed at the time of order placement based on current machine load.",
-              "This quotation is subject to availability of raw material at the time of order.",
-            ].map((t) => (
+            {TERMS.map((t) => (
               <Typography key={t} level="body-xs" sx={{ color: "neutral.600" }}>• {t}</Typography>
             ))}
           </Box>
 
-          {/* Document footer */}
-          <Divider sx={{ mb: 2 }} />
-          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
-            <Box>
-              <Typography level="body-sm">Prepared by: {data.preparedBy ?? "—"}</Typography>
-              {data.sentOn && (
-                <Typography level="body-xs" sx={{ color: "neutral.500" }}>Sent on: {fmtDate(data.sentOn)}</Typography>
-              )}
-            </Box>
+          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", pt: 2.5, borderTop: "1px solid", borderColor: "neutral.200" }}>
+            <Typography level="body-sm">Prepared by: {data.preparedByUser?.fullName ?? "—"}</Typography>
             <Box sx={{ textAlign: "right" }}>
               <Typography level="body-xs" sx={{ color: "neutral.400", mb: 3 }}>Authorised Signatory</Typography>
-              <Divider />
-              <Typography level="body-xs" sx={{ mt: 0.5 }}>NexusERP Pvt. Ltd.</Typography>
+              <Typography level="body-xs" sx={{ borderTop: "1px solid", borderColor: "neutral.300", pt: 0.5 }}>{COMPANY.name}</Typography>
             </Box>
           </Box>
         </Box>
@@ -351,7 +707,7 @@ export default function QuotationDetailPage() {
 
       {/* ── Customer Feedback ── */}
       <Box sx={{ border: "1px solid", borderColor: "neutral.200", borderRadius: "lg", backgroundColor: "background.surface", p: 3, mb: 3 }}>
-        <Typography level="title-sm" fontWeight="lg" sx={{ mb: 2, letterSpacing: "0.04em" }}>CUSTOMER FEEDBACK</Typography>
+        <Typography level="body-xs" fontWeight="lg" sx={{ color: "neutral.500", letterSpacing: "0.06em", mb: 2 }}>CUSTOMER FEEDBACK</Typography>
         <Textarea
           minRows={3}
           placeholder="Record any feedback, negotiation notes, or reasons for acceptance / rejection from the customer..."

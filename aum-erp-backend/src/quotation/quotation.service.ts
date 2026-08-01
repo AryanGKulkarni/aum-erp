@@ -1,7 +1,15 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { QuotationStatus } from '@prisma/client';
+import { OverallVerdict, Prisma, QuotationStatus } from '@prisma/client';
 import { UpdateQuotationDto } from './dto/update-quotation.dto';
+
+const quotationInclude = {
+  customer: true,
+  enquiry: true,
+  study: true,
+  preparedByUser: true,
+  quotationLines: { orderBy: { lineNumber: 'asc' } },
+} satisfies Prisma.QuotationInclude;
 
 @Injectable()
 export class QuotationService {
@@ -14,97 +22,144 @@ export class QuotationService {
     return `QUO-${year}-${sequence}`;
   }
 
-  async generateForEnquiry(enquiryId: number) {
-    const enquiry = await this.prisma.enquiry.findUnique({
-      where: { enquiryId },
+  async generateFromStudy(studyId: number) {
+    const study = await this.prisma.feasibilityStudy.findUnique({
+      where: { studyId },
       include: {
-        enquiryLines: {
+        enquiry: true,
+        feasibilityLines: {
+          where: { overallVerdict: OverallVerdict.Feasible },
           include: {
-            part: { include: { toolingDetails: true } },
-            feasibilityStudy: { include: { costEstimations: true } },
+            enquiryLine: { include: { part: true } },
+            costEstimation: true,
+            toolingSets: true,
+            processes: { include: { process: true } },
           },
+          orderBy: { enquiryLine: { lineNumber: 'asc' } },
         },
       },
     });
+    if (!study) throw new NotFoundException(`Feasibility study #${studyId} not found`);
 
-    if (!enquiry) throw new NotFoundException(`Enquiry #${enquiryId} not found`);
-
-    // Sum quotedPricePerPc * qtyPerYear across all lines that have cost data
-    let totalQuotedValue = 0;
-    for (const line of enquiry.enquiryLines) {
-      const cost = line.feasibilityStudy?.costEstimations?.[0];
-      if (cost?.quotedPricePerPc && line.qtyPerYear) {
-        totalQuotedValue += Number(cost.quotedPricePerPc) * line.qtyPerYear;
-      }
+    if (!study.feasibilityLines.length) {
+      throw new BadRequestException(
+        'This study has no lines with an overall verdict of Feasible — nothing to quote',
+      );
     }
+
+    const previous = await this.prisma.quotation.findFirst({
+      where: { studyId },
+      orderBy: { revisionNo: 'desc' },
+    });
+    const quotationNumber = previous?.quotationNumber ?? (await this.generateQuotationNumber());
+    const revisionNo = (previous?.revisionNo ?? 0) + 1;
 
     const today = new Date();
     const validUntil = new Date(today);
     validUntil.setDate(validUntil.getDate() + 30);
 
-    // If a quotation already exists for this enquiry, update it instead of creating a duplicate
-    const existing = await this.prisma.quotation.findFirst({
-      where: { enquiryId },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    if (existing) {
-      return this.prisma.quotation.update({
-        where: { quotationId: existing.quotationId },
+    return this.prisma.$transaction(async (tx) => {
+      const quotation = await tx.quotation.create({
         data: {
-          totalQuotedValue,
+          quotationNumber,
+          studyId,
+          enquiryId: study.enquiryId,
+          customerId: study.enquiry.customerId,
+          revisionNo,
           quotationDate: today,
           validUntil,
-          preparedBy: enquiry.receivedBy,
+          preparedBy: study.assessedBy,
           quotationStatus: QuotationStatus.Draft,
         },
-        include: {
-          enquiry: { include: { customer: true } },
-        },
       });
-    }
 
-    const quotationNumber = await this.generateQuotationNumber();
+      let totalMonthlyValue = 0;
 
-    return this.prisma.quotation.create({
-      data: {
-        enquiryId,
-        quotationNumber,
-        quotationDate: today,
-        validUntil,
-        preparedBy: enquiry.receivedBy,
-        totalQuotedValue,
-        quotationStatus: QuotationStatus.Draft,
-      },
-      include: {
-        enquiry: { include: { customer: true } },
-      },
+      for (const [index, line] of study.feasibilityLines.entries()) {
+        const cost = line.costEstimation;
+        const qtyPerMonth = line.enquiryLine.qtyPerMonth ?? null;
+        const costPerPc = cost?.quotedPricePerPc ?? null;
+        const monthlyValue =
+          costPerPc !== null && qtyPerMonth !== null ? Number(costPerPc) * qtyPerMonth : null;
+        const developmentCost = line.toolingSets.length
+          ? line.toolingSets.reduce((sum, ts) => sum + Number(ts.estimatedDieCost ?? 0), 0)
+          : null;
+        const processesText =
+          line.processes.map((p) => p.process.processName).join(', ') || null;
+
+        if (monthlyValue !== null) totalMonthlyValue += monthlyValue;
+
+        await tx.quotationLine.create({
+          data: {
+            quotationId: quotation.quotationId,
+            lineNumber: index + 1,
+            feasibilityLineId: line.feasibilityLineId,
+            partName: line.enquiryLine.part.partName,
+            partDrawingNumber: line.enquiryLine.part.partDrawingNumber,
+            materialGrade: line.enquiryLine.part.materialGrade,
+            processesText,
+            rmDiameterMm: cost?.rmDiameterMm,
+            forgingYieldPct: cost?.forgingYieldPct,
+            forgingWeightKg: cost?.forgingWeightKg,
+            cutPcWeightKg: cost?.cutPcWeightKg,
+            grossWeightKg: cost?.grossWeightKg,
+            rmRatePerKg: cost?.rmRatePerKg,
+            dieFactorPerPc: cost?.dieFactorPerPc,
+            cuttingCostFactorPerCm2: cost?.cuttingCostFactorPerCm2,
+            forgingConversionPerKg: cost?.forgingConversionPerKg,
+            htFactorPerKg: cost?.htFactorPerKg,
+            visualInspectionPerPc: cost?.visualInspectionPerPc,
+            rejectionFactorPct: cost?.rejectionFactorPct,
+            iccFactorPct: cost?.iccFactorPct,
+            transportationFactorPct: cost?.transportationFactorPct,
+            profitOnVaFactorPct: cost?.profitOnVaFactorPct,
+            scrapFactorPerKg: cost?.scrapFactorPerKg,
+            rmCost: cost?.rmCost,
+            cuttingCost: cost?.cuttingCost,
+            forgingConversionCost: cost?.forgingConversionCost,
+            htShotblastCost: cost?.htShotblastCost,
+            visualInspectionCost: cost?.visualInspectionCost,
+            valueAddition: cost?.valueAddition,
+            subTotal: cost?.subTotal,
+            rejectionCost: cost?.rejectionCost,
+            iccCost: cost?.iccCost,
+            transportationCost: cost?.transportationCost,
+            profitOnVa: cost?.profitOnVa,
+            scrapAmount: cost?.scrapAmount,
+            costPerPc,
+            qtyPerMonth,
+            monthlyValue,
+            developmentCost,
+          },
+        });
+      }
+
+      return tx.quotation.update({
+        where: { quotationId: quotation.quotationId },
+        data: {
+          totalMonthlyValue,
+          annualEstimate: totalMonthlyValue * 12,
+        },
+        include: quotationInclude,
+      });
     });
   }
 
   async findAll() {
     return this.prisma.quotation.findMany({
-      include: { enquiry: { include: { customer: true } } },
-      orderBy: { createdAt: 'desc' },
+      include: {
+        customer: true,
+        enquiry: true,
+        _count: { select: { quotationLines: true } },
+      },
+      orderBy: [{ quotationNumber: 'desc' }, { revisionNo: 'desc' }],
     });
   }
 
   async findOne(id: number) {
     const quotation = await this.prisma.quotation.findUnique({
       where: { quotationId: id },
-      include: {
-        enquiry: {
-          include: {
-            customer: true,
-            enquiryLines: {
-              include: {
-                part: { include: { toolingDetails: true } },
-                feasibilityStudy: { include: { costEstimations: true } },
-              },
-            },
-          },
-        },
-      },
+      include: quotationInclude,
     });
     if (!quotation) throw new NotFoundException(`Quotation #${id} not found`);
     return quotation;
@@ -120,21 +175,11 @@ export class QuotationService {
         validUntil: dto.validUntil ? new Date(dto.validUntil) : undefined,
         quotationStatus: dto.quotationStatus as QuotationStatus | undefined,
         sentOn: dto.sentOn ? new Date(dto.sentOn) : undefined,
+        acceptedOn: dto.acceptedOn ? new Date(dto.acceptedOn) : undefined,
+        rejectedOn: dto.rejectedOn ? new Date(dto.rejectedOn) : undefined,
         customerFeedback: dto.customerFeedback,
       },
-      include: {
-        enquiry: {
-          include: {
-            customer: true,
-            enquiryLines: {
-              include: {
-                part: { include: { toolingDetails: true } },
-                feasibilityStudy: { include: { costEstimations: true } },
-              },
-            },
-          },
-        },
-      },
+      include: quotationInclude,
     });
   }
 

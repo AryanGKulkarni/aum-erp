@@ -9,9 +9,12 @@ import { EnquiryModule } from './enquiry/enquiry.module';
 import { QuotationModule } from './quotation/quotation.module';
 import { CustomerModule } from './customer/customer.module';
 import { PartModule } from './part/part.module';
+import { MachineModule } from './machine/machine.module';
+import { UserModule } from './user/user.module';
+import { ProcessModule } from './process/process.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule, FeasibilityStudyModule, EnquiryModule, QuotationModule, CustomerModule, PartModule],
+  imports: [PrismaModule, AuthModule, FeasibilityStudyModule, EnquiryModule, QuotationModule, CustomerModule, PartModule, MachineModule, UserModule, ProcessModule],
   controllers: [AppController],
   providers: [AppService, EmailService],
   exports: [EmailService],

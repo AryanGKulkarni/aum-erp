@@ -14,7 +14,6 @@ export class PartController {
         partName: true,
         partDrawingNumber: true,
         materialGrade: true,
-        partStatus: true,
         customerId: true,
       },
       orderBy: { partName: 'asc' },
