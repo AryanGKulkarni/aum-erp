@@ -22,6 +22,7 @@ export interface MachineOption {
 export interface UserOption {
   id: string;
   name: string;
+  email: string | null;
   role: string;
 }
 
@@ -33,6 +34,13 @@ export interface ProcessOption {
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000";
+
+// All API endpoints require an authenticated session (except /auth/*'s public
+// routes) — credentials must always be sent so the auth_token cookie reaches
+// the backend, including cross-port in dev (localhost:3000 -> localhost:5000).
+function apiFetch(input: string, init?: RequestInit): Promise<Response> {
+  return fetch(input, { ...init, credentials: "include" });
+}
 
 // --- Raw backend shapes ---
 
@@ -168,7 +176,7 @@ function mapStudyStatus(s: string): FeasibilityStudy["status"] {
 // --- API functions ---
 
 export async function getEnquiries(): Promise<Enquiry[]> {
-  const res = await fetch(`${API_URL}/enquiry`);
+  const res = await apiFetch(`${API_URL}/enquiry`);
   if (!res.ok) throw new Error("Failed to fetch enquiries");
   const data: RawEnquiry[] = await res.json();
   return data.map((e) => ({
@@ -184,7 +192,7 @@ export async function getEnquiries(): Promise<Enquiry[]> {
 }
 
 export async function getFeasibilityStudies(): Promise<FeasibilityStudy[]> {
-  const res = await fetch(`${API_URL}/feasibility-study`);
+  const res = await apiFetch(`${API_URL}/feasibility-study`);
   if (!res.ok) throw new Error("Failed to fetch feasibility studies");
   const data: RawFeasibilityStudyListItem[] = await res.json();
   return data.map((s) => ({
@@ -200,7 +208,7 @@ export async function getFeasibilityStudies(): Promise<FeasibilityStudy[]> {
 }
 
 export async function createFeasibilityStudy(dto: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const res = await fetch(`${API_URL}/feasibility-study`, {
+  const res = await apiFetch(`${API_URL}/feasibility-study`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(dto),
@@ -213,13 +221,13 @@ export async function createFeasibilityStudy(dto: Record<string, unknown>): Prom
 }
 
 export async function getFeasibilityStudy(id: string): Promise<Record<string, unknown>> {
-  const res = await fetch(`${API_URL}/feasibility-study/${id}`);
+  const res = await apiFetch(`${API_URL}/feasibility-study/${id}`);
   if (!res.ok) throw new Error("Failed to fetch feasibility study");
   return res.json();
 }
 
 export async function getFeasibilityStudyByEnquiry(enquiryId: string): Promise<Record<string, unknown> | null> {
-  const res = await fetch(`${API_URL}/feasibility-study?enquiryId=${enquiryId}`);
+  const res = await apiFetch(`${API_URL}/feasibility-study?enquiryId=${enquiryId}`);
   if (!res.ok) throw new Error("Failed to fetch feasibility study");
   const data: Array<{ studyId: number }> = await res.json();
   return data[0] ? getFeasibilityStudy(String(data[0].studyId)) : null;
@@ -229,7 +237,7 @@ export async function updateFeasibilityStudy(
   id: string,
   dto: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  const res = await fetch(`${API_URL}/feasibility-study/${id}`, {
+  const res = await apiFetch(`${API_URL}/feasibility-study/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(dto),
@@ -242,7 +250,7 @@ export async function updateFeasibilityStudy(
 }
 
 export async function getProcesses(): Promise<ProcessOption[]> {
-  const res = await fetch(`${API_URL}/process`);
+  const res = await apiFetch(`${API_URL}/process`);
   if (!res.ok) throw new Error("Failed to fetch processes");
   const data: Array<{ processId: number; processCode: string; processName: string; displayOrder: number }> =
     await res.json();
@@ -262,14 +270,14 @@ interface AttachmentRaw {
 }
 
 export async function generateQuotation(enquiryId: string): Promise<void> {
-  const res = await fetch(`${API_URL}/quotation/generate/${enquiryId}`, {
+  const res = await apiFetch(`${API_URL}/quotation/generate/${enquiryId}`, {
     method: "POST",
   });
   if (!res.ok) throw new Error("Failed to generate quotation");
 }
 
 export async function getCustomers(): Promise<CustomerOption[]> {
-  const res = await fetch(`${API_URL}/customer`);
+  const res = await apiFetch(`${API_URL}/customer`);
   if (!res.ok) throw new Error("Failed to fetch customers");
   const data: Array<{ customerId: number; companyName: string; contactPerson: string | null }> =
     await res.json();
@@ -277,7 +285,7 @@ export async function getCustomers(): Promise<CustomerOption[]> {
 }
 
 export async function createCustomer(dto: Record<string, unknown>): Promise<CustomerOption> {
-  const res = await fetch(`${API_URL}/customer`, {
+  const res = await apiFetch(`${API_URL}/customer`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(dto),
@@ -291,7 +299,7 @@ export async function getParts(customerId?: string): Promise<PartOption[]> {
   const url = customerId
     ? `${API_URL}/part?customerId=${customerId}`
     : `${API_URL}/part`;
-  const res = await fetch(url);
+  const res = await apiFetch(url);
   if (!res.ok) throw new Error("Failed to fetch parts");
   const data: Array<{ partId: number; partName: string; partDrawingNumber: string | null; customerId: number | null }> =
     await res.json();
@@ -304,7 +312,7 @@ export async function getParts(customerId?: string): Promise<PartOption[]> {
 }
 
 export async function getMachines(): Promise<MachineOption[]> {
-  const res = await fetch(`${API_URL}/machine`);
+  const res = await apiFetch(`${API_URL}/machine`);
   if (!res.ok) throw new Error("Failed to fetch machines");
   const data: Array<{ machineId: number; machineName: string; machineType: string }> =
     await res.json();
@@ -312,10 +320,24 @@ export async function getMachines(): Promise<MachineOption[]> {
 }
 
 export async function getUsers(): Promise<UserOption[]> {
-  const res = await fetch(`${API_URL}/user`);
+  const res = await apiFetch(`${API_URL}/user`);
   if (!res.ok) throw new Error("Failed to fetch users");
-  const data: Array<{ userId: number; fullName: string; role: string }> = await res.json();
-  return data.map((u) => ({ id: String(u.userId), name: u.fullName, role: u.role }));
+  const data: Array<{ userId: number; fullName: string; email: string | null; role: string }> = await res.json();
+  return data.map((u) => ({ id: String(u.userId), name: u.fullName, email: u.email, role: u.role }));
+}
+
+export async function createUser(dto: { fullName: string; email: string; role: string }): Promise<UserOption> {
+  const res = await apiFetch(`${API_URL}/user`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(dto),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.message ?? "Failed to create user");
+  }
+  const u: { userId: number; fullName: string; email: string | null; role: string } = await res.json();
+  return { id: String(u.userId), name: u.fullName, email: u.email, role: u.role };
 }
 
 interface RawCreatedEnquiryLine {
@@ -328,7 +350,7 @@ interface RawCreatedEnquiry {
 }
 
 export async function createEnquiry(dto: Record<string, unknown>): Promise<RawCreatedEnquiry> {
-  const res = await fetch(`${API_URL}/enquiry`, {
+  const res = await apiFetch(`${API_URL}/enquiry`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(dto),
@@ -345,7 +367,7 @@ export async function uploadEnquiryLineAttachments(
   const formData = new FormData();
   files.forEach((f) => formData.append("attachments", f));
   if (uploadedBy) formData.append("uploadedBy", uploadedBy);
-  const res = await fetch(`${API_URL}/enquiry/lines/${lineId}/attachments`, {
+  const res = await apiFetch(`${API_URL}/enquiry/lines/${lineId}/attachments`, {
     method: "POST",
     body: formData,
   });
@@ -354,25 +376,25 @@ export async function uploadEnquiryLineAttachments(
 }
 
 export async function viewEnquiryAttachment(attachmentId: number): Promise<string> {
-  const res = await fetch(`${API_URL}/enquiry/attachments/${attachmentId}/view`);
+  const res = await apiFetch(`${API_URL}/enquiry/attachments/${attachmentId}/view`);
   if (!res.ok) throw new Error("Failed to load attachment");
   const blob = await res.blob();
   return URL.createObjectURL(blob);
 }
 
 export async function deleteEnquiryAttachment(attachmentId: number): Promise<void> {
-  const res = await fetch(`${API_URL}/enquiry/attachments/${attachmentId}`, { method: "DELETE" });
+  const res = await apiFetch(`${API_URL}/enquiry/attachments/${attachmentId}`, { method: "DELETE" });
   if (!res.ok) throw new Error("Failed to delete attachment");
 }
 
 export async function getEnquiry(id: string): Promise<Record<string, unknown>> {
-  const res = await fetch(`${API_URL}/enquiry/${id}`);
+  const res = await apiFetch(`${API_URL}/enquiry/${id}`);
   if (!res.ok) throw new Error("Failed to fetch enquiry");
   return res.json();
 }
 
 export async function updateEnquiry(id: string, dto: Record<string, unknown>): Promise<RawCreatedEnquiry> {
-  const res = await fetch(`${API_URL}/enquiry/${id}`, {
+  const res = await apiFetch(`${API_URL}/enquiry/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(dto),
@@ -382,13 +404,13 @@ export async function updateEnquiry(id: string, dto: Record<string, unknown>): P
 }
 
 export async function getQuotationDetail(id: string): Promise<QuotationDetail> {
-  const res = await fetch(`${API_URL}/quotation/${id}`);
+  const res = await apiFetch(`${API_URL}/quotation/${id}`);
   if (!res.ok) throw new Error("Failed to fetch quotation");
   return res.json();
 }
 
 export async function updateQuotation(id: string, dto: Record<string, unknown>): Promise<void> {
-  const res = await fetch(`${API_URL}/quotation/${id}`, {
+  const res = await apiFetch(`${API_URL}/quotation/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(dto),
@@ -397,7 +419,7 @@ export async function updateQuotation(id: string, dto: Record<string, unknown>):
 }
 
 export async function getQuotations(): Promise<Quotation[]> {
-  const res = await fetch(`${API_URL}/quotation`);
+  const res = await apiFetch(`${API_URL}/quotation`);
   if (!res.ok) throw new Error("Failed to fetch quotations");
   const data: RawQuotation[] = await res.json();
   return data.map((q) => ({
@@ -411,4 +433,37 @@ export async function getQuotations(): Promise<Quotation[]> {
     parts: q._count.quotationLines,
     status: (q.quotationStatus ?? "Draft") as Quotation["status"],
   }));
+}
+
+export function getGoogleAuthUrl(): string {
+  return `${API_URL}/auth/google`;
+}
+
+export async function sendEmailLoginLink(email: string): Promise<void> {
+  const res = await apiFetch(`${API_URL}/auth/email`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.message ?? "Failed to send login link");
+  }
+}
+
+export interface CurrentUser {
+  userId: number;
+  fullName: string;
+  email: string | null;
+  role: string;
+}
+
+export async function getCurrentUser(): Promise<CurrentUser | null> {
+  const res = await apiFetch(`${API_URL}/auth/me`);
+  if (!res.ok) return null;
+  return res.json();
+}
+
+export async function logout(): Promise<void> {
+  await apiFetch(`${API_URL}/auth/logout`, { method: "POST" });
 }

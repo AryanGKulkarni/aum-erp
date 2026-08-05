@@ -1,3 +1,6 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import List from "@mui/joy/List";
 import Typography from "@mui/joy/Typography";
 import Box from "@mui/joy/Box";
@@ -5,8 +8,17 @@ import { NAV_ITEMS } from "@/constants/navigation";
 import SidebarItem from "./SidebarItem";
 import UserFooter from "./UserFooter";
 import { SidebarContainer, BrandSection, NavSection } from "./Sidebar.styles";
+import { getCurrentUser } from "@/services/api_service";
 
 export default function Sidebar() {
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    getCurrentUser().then((user) => setIsAdmin(user?.role === "Admin"));
+  }, []);
+
+  const navItems = NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin);
+
   return (
     <SidebarContainer variant="plain">
       <Box>
@@ -39,7 +51,7 @@ export default function Sidebar() {
 
         <NavSection>
           <List size="sm" sx={{ "--ListItem-paddingY": "8px" }}>
-            {NAV_ITEMS.map((item) => (
+            {navItems.map((item) => (
               <SidebarItem key={item.key} item={item} />
             ))}
           </List>

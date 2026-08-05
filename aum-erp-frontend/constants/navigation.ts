@@ -2,6 +2,7 @@ import DashboardRoundedIcon from "@mui/icons-material/DashboardRounded";
 import DescriptionRoundedIcon from "@mui/icons-material/DescriptionRounded";
 import RequestQuoteRoundedIcon from "@mui/icons-material/RequestQuoteRounded";
 import ScienceRoundedIcon from "@mui/icons-material/ScienceRounded";
+import GroupRoundedIcon from "@mui/icons-material/GroupRounded";
 import type { NavItem } from "@/types/navigation";
 
 export const NAV_ITEMS: NavItem[] = [
@@ -32,5 +33,13 @@ export const NAV_ITEMS: NavItem[] = [
     href: "/feasibility-study",
     icon: ScienceRoundedIcon,
     badge: 1,
+  },
+  {
+    key: "users",
+    label: "Users",
+    href: "/users",
+    icon: GroupRoundedIcon,
+    badge: null,
+    adminOnly: true,
   },
 ];

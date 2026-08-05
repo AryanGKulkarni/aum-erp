@@ -35,6 +35,38 @@ export class AuthService {
     });
   }
 
+  async verifyEmailToken(token: string) {
+    let payload: { sub: number; email: string };
+    try {
+      payload = this.jwtService.verify(token);
+    } catch {
+      throw new UnauthorizedException('This login link is invalid or has expired');
+    }
+
+    const user = await this.prisma.user.findUnique({ where: { userId: payload.sub } });
+    if (!user) throw new UnauthorizedException('No account found for this login link');
+
+    return { user, sessionToken: this.issueSessionToken(user) };
+  }
+
+  issueSessionToken(user: { userId: number; email: string | null }): string {
+    return this.jwtService.sign({ sub: user.userId, email: user.email }, { expiresIn: '7d' });
+  }
+
+  async getUserFromSessionToken(token: string | undefined) {
+    if (!token) throw new UnauthorizedException('Not logged in');
+    let payload: { sub: number };
+    try {
+      payload = this.jwtService.verify(token);
+    } catch {
+      throw new UnauthorizedException('Session expired');
+    }
+
+    const user = await this.prisma.user.findUnique({ where: { userId: payload.sub } });
+    if (!user) throw new UnauthorizedException('Session expired');
+    return user;
+  }
+
   async validateUser(details: { email: string; firstName: string; lastName: string }) {
     // Users are pre-provisioned by an admin with a role — Google sign-in only
     // authenticates an existing account, it never creates one.

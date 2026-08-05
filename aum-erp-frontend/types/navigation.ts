@@ -6,4 +6,5 @@ export interface NavItem {
   href: string;
   icon: SvgIconComponent;
   badge: number | null;
+  adminOnly?: boolean;
 }
