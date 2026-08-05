@@ -43,6 +43,8 @@ jobs:
         with:
           context: ./aum-erp-frontend
           push: true
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}
           tags: |
             ghcr.io/aryangkulkarni/aum-erp-frontend:latest
 
