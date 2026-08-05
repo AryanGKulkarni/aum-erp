@@ -35,7 +35,7 @@ jobs:
           context: ./aum-erp-backend
           push: true
           tags: |
-            ghcr.io/${{ env.OWNER }}/aum-erp-backend:latest
+            ghcr.io/aryangkulkarni/aum-erp-backend:latest
 
       # Frontend
       - name: Build & Push Frontend
@@ -44,7 +44,7 @@ jobs:
           context: ./aum-erp-frontend
           push: true
           tags: |
-            ghcr.io/${{ env.OWNER }}/aum-erp-frontend:latest
+            ghcr.io/aryangkulkarni/aum-erp-frontend:latest
 
   deploy:
     needs: build
