@@ -17,13 +17,9 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteOutlinedIcon from "@mui/icons-material/DeleteOutlined";
-import SaveOutlinedIcon from "@mui/icons-material/SaveOutlined";
 import SendOutlinedIcon from "@mui/icons-material/SendOutlined";
 import DescriptionOutlinedIcon from "@mui/icons-material/DescriptionOutlined";
 import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
-import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutlined";
-import CancelOutlinedIcon from "@mui/icons-material/CancelOutlined";
-import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import {
   getEnquiries,
   getEnquiry,
@@ -89,7 +85,9 @@ function Field({ label, required, auto, children, span }: {
   label: string; required?: boolean; auto?: boolean; children: React.ReactNode; span?: number;
 }) {
   return (
-    <Box sx={span ? { gridColumn: `span ${span}` } : {}}>
+    // minWidth: 0 lets the field shrink inside its grid track instead of
+    // forcing the track wider and overflowing the section.
+    <Box sx={{ minWidth: 0, ...(span ? { gridColumn: `span ${span}` } : {}) }}>
       <Typography level="body-xs" sx={{ mb: 0.5, color: "neutral.600", fontWeight: 500 }}>
         {label}
         {required && <Typography component="span" sx={{ color: "danger.500" }}> *</Typography>}
@@ -162,6 +160,7 @@ interface ToolingSetForm {
 interface CostEstimationForm {
   rmDiameterMm: string;
   forgingYieldPct: string;
+  forgingWeightKg: string;
   cutPcWeightKg: string;
   grossWeightKg: string;
   rmRatePerKg: string;
@@ -179,7 +178,7 @@ interface CostEstimationForm {
 
 function emptyCostEstimation(): CostEstimationForm {
   return {
-    rmDiameterMm: "", forgingYieldPct: "", cutPcWeightKg: "", grossWeightKg: "",
+    rmDiameterMm: "", forgingYieldPct: "", forgingWeightKg: "", cutPcWeightKg: "", grossWeightKg: "",
     rmRatePerKg: "", dieFactorPerPc: "", cuttingCostFactorPerCm2: "", forgingConversionPerKg: "",
     htFactorPerKg: "", visualInspectionPerPc: "", rejectionFactorPct: "", iccFactorPct: "",
     transportationFactorPct: "", profitOnVaFactorPct: "", scrapFactorPerKg: "",
@@ -196,19 +195,11 @@ interface LineForm {
   partDrawingNumber: string;
   materialGrade: string;
   supplyType: string;
-  qtyPerMonth: number | null;
-  // technical assessment
-  forgingWeightKg: string;
-  finishWeightKg: string;
-  billetDiameterMm: string;
-  billetLengthMm: string;
+  // technical assessment — weights and billet dimensions live on costEstimation
   processIds: string[];
   recommendedMachineId: string;
   billetWeightEstKg: string;
   flashAllowancePct: string;
-  cycleTimeMin: string;
-  availableCapacityHrs: string;
-  capacityFeasible: "" | "Yes" | "Over_Capacity" | "Not_Assessed";
   flagsRisks: string;
   verdictRemarks: string;
   overallVerdict: "" | "Feasible" | "Conditional" | "Not_Feasible";
@@ -230,11 +221,8 @@ function lineFromEnquiryLine(el: any): LineForm {
     partDrawingNumber: el.part?.partDrawingNumber ?? "",
     materialGrade: el.part?.materialGrade ?? "",
     supplyType: el.supplyType ?? "",
-    qtyPerMonth: el.qtyPerMonth ?? null,
-    forgingWeightKg: "", finishWeightKg: "", billetDiameterMm: "", billetLengthMm: "",
     processIds: [], recommendedMachineId: "", billetWeightEstKg: "", flashAllowancePct: "",
-    cycleTimeMin: "", availableCapacityHrs: "", capacityFeasible: "", flagsRisks: "",
-    verdictRemarks: "", overallVerdict: "",
+    flagsRisks: "", verdictRemarks: "", overallVerdict: "",
     toolingSets: [],
     costEstimation: emptyCostEstimation(),
   };
@@ -253,19 +241,11 @@ function lineFromFeasibilityLine(fl: any): LineForm {
     partDrawingNumber: el?.part?.partDrawingNumber ?? "",
     materialGrade: el?.part?.materialGrade ?? "",
     supplyType: el?.supplyType ?? "",
-    qtyPerMonth: el?.qtyPerMonth ?? null,
-    forgingWeightKg: str(fl.forgingWeightKg),
-    finishWeightKg: str(fl.finishWeightKg),
-    billetDiameterMm: str(fl.billetDiameterMm),
-    billetLengthMm: str(fl.billetLengthMm),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     processIds: (fl.processes ?? []).map((p: any) => String(p.processId)),
     recommendedMachineId: fl.recommendedMachineId ? String(fl.recommendedMachineId) : "",
     billetWeightEstKg: str(fl.billetWeightEstKg),
     flashAllowancePct: str(fl.flashAllowancePct),
-    cycleTimeMin: str(fl.cycleTimeMin),
-    availableCapacityHrs: str(fl.availableCapacityHrs),
-    capacityFeasible: (fl.capacityFeasible ?? "") as LineForm["capacityFeasible"],
     flagsRisks: fl.flagsRisks ?? "",
     verdictRemarks: fl.verdictRemarks ?? "",
     overallVerdict: (fl.overallVerdict ?? "") as LineForm["overallVerdict"],
@@ -283,6 +263,7 @@ function lineFromFeasibilityLine(fl: any): LineForm {
       ? {
           rmDiameterMm: str(cost.rmDiameterMm),
           forgingYieldPct: str(cost.forgingYieldPct),
+          forgingWeightKg: str(cost.forgingWeightKg),
           cutPcWeightKg: str(cost.cutPcWeightKg),
           grossWeightKg: str(cost.grossWeightKg),
           rmRatePerKg: str(cost.rmRatePerKg),
@@ -303,49 +284,45 @@ function lineFromFeasibilityLine(fl: any): LineForm {
 
 // ── computed values for a line ───────────────────────────────────────────────
 
+// Share of the (gross − net) offcut recovered as sellable scrap.
+const SCRAP_RECOVERY_PCT = 0.8;
+
 function computeLine(line: LineForm) {
-  const materialUtilPct =
-    hasVal(line.finishWeightKg) && hasVal(line.billetWeightEstKg) && n(line.billetWeightEstKg) > 0
-      ? (n(line.finishWeightKg) / n(line.billetWeightEstKg)) * 100
-      : null;
-
-  const machineLoadHrsMonth =
-    hasVal(line.cycleTimeMin) && line.qtyPerMonth
-      ? (n(line.cycleTimeMin) * line.qtyPerMonth) / 60
-      : null;
-
   const c = line.costEstimation;
   const grossWeightKg = n(c.grossWeightKg);
-  const cutPcWeightKg = n(c.cutPcWeightKg);
-  const forgingWeightKg = n(line.forgingWeightKg);
-  const rmDiameterCm = n(c.rmDiameterMm) / 10;
-  const crossSectionAreaCm2 = rmDiameterCm > 0 ? Math.PI * (rmDiameterCm / 2) ** 2 : 0;
+  // forgingWeightKg is labelled "Net Weight (kg)" in the UI.
+  const netWeightKg = n(c.forgingWeightKg);
 
   const rmCost = hasVal(c.rmRatePerKg) && hasVal(c.grossWeightKg) ? n(c.rmRatePerKg) * grossWeightKg : null;
-  const cuttingCost = hasVal(c.cuttingCostFactorPerCm2) && hasVal(c.rmDiameterMm)
-    ? n(c.cuttingCostFactorPerCm2) * crossSectionAreaCm2
+
+  // ── Value Addition components ──
+  // Cutting and die factor are entered directly as per-piece amounts.
+  const cuttingCost = hasVal(c.cuttingCostFactorPerCm2) ? n(c.cuttingCostFactorPerCm2) : null;
+  const dieCost = hasVal(c.dieFactorPerPc) ? n(c.dieFactorPerPc) : null;
+  const forgingConversionCost = hasVal(c.forgingConversionPerKg) && hasVal(c.grossWeightKg)
+    ? n(c.forgingConversionPerKg) * grossWeightKg
     : null;
-  const forgingConversionCost = hasVal(c.forgingConversionPerKg) && hasVal(line.forgingWeightKg)
-    ? n(c.forgingConversionPerKg) * forgingWeightKg
-    : null;
-  const htShotblastCost = hasVal(c.htFactorPerKg) && hasVal(line.forgingWeightKg)
-    ? n(c.htFactorPerKg) * forgingWeightKg
+  const htShotblastCost = hasVal(c.htFactorPerKg) && hasVal(c.forgingWeightKg)
+    ? n(c.htFactorPerKg) * netWeightKg
     : null;
   const visualInspectionCost = hasVal(c.visualInspectionPerPc) ? n(c.visualInspectionPerPc) : null;
 
-  const valueAddition =
-    cuttingCost !== null || forgingConversionCost !== null || htShotblastCost !== null || visualInspectionCost !== null
-      ? (cuttingCost ?? 0) + (forgingConversionCost ?? 0) + (htShotblastCost ?? 0) + (visualInspectionCost ?? 0)
-      : null;
+  const vaParts = [cuttingCost, dieCost, forgingConversionCost, htShotblastCost, visualInspectionCost];
+  const valueAddition = vaParts.some((p) => p !== null)
+    ? vaParts.reduce<number>((sum, p) => sum + (p ?? 0), 0)
+    : null;
 
   const subTotal = rmCost !== null || valueAddition !== null ? (rmCost ?? 0) + (valueAddition ?? 0) : null;
 
   const rejectionCost = subTotal !== null && hasVal(c.rejectionFactorPct) ? subTotal * (n(c.rejectionFactorPct) / 100) : null;
   const iccCost = subTotal !== null && hasVal(c.iccFactorPct) ? subTotal * (n(c.iccFactorPct) / 100) : null;
-  const transportationCost = subTotal !== null && hasVal(c.transportationFactorPct) ? subTotal * (n(c.transportationFactorPct) / 100) : null;
+  // Despite the column name, this is a ₹/kg rate applied to net weight — not a percentage.
+  const transportationCost = hasVal(c.transportationFactorPct) && hasVal(c.forgingWeightKg)
+    ? n(c.transportationFactorPct) * netWeightKg
+    : null;
   const profitOnVa = valueAddition !== null && hasVal(c.profitOnVaFactorPct) ? valueAddition * (n(c.profitOnVaFactorPct) / 100) : null;
-  const scrapAmount = hasVal(c.scrapFactorPerKg) && hasVal(c.grossWeightKg) && hasVal(c.cutPcWeightKg)
-    ? n(c.scrapFactorPerKg) * (grossWeightKg - cutPcWeightKg) * 0.8
+  const scrapAmount = hasVal(c.scrapFactorPerKg) && hasVal(c.grossWeightKg) && hasVal(c.forgingWeightKg)
+    ? n(c.scrapFactorPerKg) * SCRAP_RECOVERY_PCT * (grossWeightKg - netWeightKg)
     : null;
 
   const quotedPricePerPc =
@@ -354,8 +331,7 @@ function computeLine(line: LineForm) {
       : null;
 
   return {
-    materialUtilPct, machineLoadHrsMonth,
-    rmCost, cuttingCost, forgingConversionCost, htShotblastCost, visualInspectionCost,
+    rmCost, cuttingCost, dieCost, forgingConversionCost, htShotblastCost, visualInspectionCost,
     valueAddition, subTotal, rejectionCost, iccCost, transportationCost, profitOnVa, scrapAmount,
     quotedPricePerPc,
   };
@@ -493,18 +469,9 @@ export default function FeasibilityStudyForm({ mode, studyId, initialData }: Pro
         return {
           feasibilityLineId: l.feasibilityLineId,
           enquiryLineId: l.enquiryLineId,
-          forgingWeightKg: num(l.forgingWeightKg),
-          finishWeightKg: num(l.finishWeightKg),
-          billetDiameterMm: num(l.billetDiameterMm),
-          billetLengthMm: num(l.billetLengthMm),
           recommendedMachineId: parseInt(l.recommendedMachineId),
           billetWeightEstKg: num(l.billetWeightEstKg),
           flashAllowancePct: num(l.flashAllowancePct),
-          materialUtilisationPct: c.materialUtilPct ?? undefined,
-          cycleTimeMin: num(l.cycleTimeMin),
-          machineLoadHrsMonth: c.machineLoadHrsMonth ?? undefined,
-          availableCapacityHrs: num(l.availableCapacityHrs),
-          capacityFeasible: l.capacityFeasible || undefined,
           flagsRisks: l.flagsRisks || undefined,
           overallVerdict: l.overallVerdict || undefined,
           verdictRemarks: l.verdictRemarks || undefined,
@@ -519,7 +486,7 @@ export default function FeasibilityStudyForm({ mode, studyId, initialData }: Pro
           costEstimation: {
             rmDiameterMm: num(l.costEstimation.rmDiameterMm),
             forgingYieldPct: num(l.costEstimation.forgingYieldPct),
-            forgingWeightKg: num(l.forgingWeightKg),
+            forgingWeightKg: num(l.costEstimation.forgingWeightKg),
             cutPcWeightKg: num(l.costEstimation.cutPcWeightKg),
             grossWeightKg: num(l.costEstimation.grossWeightKg),
             rmRatePerKg: num(l.costEstimation.rmRatePerKg),
@@ -620,42 +587,15 @@ export default function FeasibilityStudyForm({ mode, studyId, initialData }: Pro
           <Typography level="h3">{title}</Typography>
           <Typography level="body-sm" sx={{ color: "neutral.500" }}>{lines.length} parts to assess</Typography>
         </Box>
-        <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
-          <Button variant="outlined" color="neutral" onClick={() => router.push("/feasibility-study")} disabled={submitting}>
-            Cancel
-          </Button>
-          <Button
-            variant="solid" color="primary"
-            startDecorator={submitting ? <CircularProgress size="sm" /> : <SaveOutlinedIcon />}
-            onClick={() => submit("Draft")}
-            disabled={submitting}
-          >
-            Save Draft
-          </Button>
-          <Button
-            variant="solid" color="success"
-            startDecorator={submitting ? <CircularProgress size="sm" /> : <SendOutlinedIcon />}
-            onClick={() => submit("Submitted_for_Review")}
-            disabled={submitting}
-          >
-            Submit for Review
-          </Button>
-          <Button
-            variant="solid"
-            sx={{ backgroundColor: "#b39ddb", "&:hover": { backgroundColor: "#a48cd0" } }}
-            startDecorator={generating ? <CircularProgress size="sm" /> : <DescriptionOutlinedIcon />}
-            onClick={handleGenerateQuotation}
-            disabled={mode === "new" || generating}
-          >
-            Generate Quotation
-          </Button>
-        </Box>
+        <Button variant="outlined" color="neutral" onClick={() => router.push("/feasibility-study")} disabled={submitting}>
+          Cancel
+        </Button>
       </Box>
 
       {/* ── Study Details ── */}
       <SectionBox sx={{ mb: 3, p: 3 }}>
         <SectionHeader label="STUDY DETAILS" />
-        <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 2 }}>
+        <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 2 }}>
           <Field label="Enquiry" required>
             <Select
               placeholder="— Select enquiry —"
@@ -753,7 +693,7 @@ export default function FeasibilityStudyForm({ mode, studyId, initialData }: Pro
                     {/* Part information (read-only) */}
                     <SectionBox muted sx={{ p: 2 }}>
                       <SectionHeader label="PART INFORMATION — FROM ENQUIRY" />
-                      <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 2 }}>
+                      <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 2 }}>
                         <ReadOnlyValue label="Part Name" value={line.partName} />
                         <ReadOnlyValue label="Drawing Number" value={line.partDrawingNumber || "—"} />
                         <ReadOnlyValue label="Material Grade" value={line.materialGrade || "—"} />
@@ -764,22 +704,108 @@ export default function FeasibilityStudyForm({ mode, studyId, initialData }: Pro
                       </Box>
                     </SectionBox>
 
-                    {/* Weight & Billet Dimensions */}
+                    {/* Cost & Pricing */}
                     <SectionBox muted sx={{ p: 2 }}>
-                      <SectionHeader label="WEIGHT & BILLET DIMENSIONS" />
-                      <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 2 }}>
-                        <Field label="Forging Weight (kg)">
-                          <Input type="number" placeholder="0.000" value={line.forgingWeightKg} onChange={(e) => setLine(line._key, { forgingWeightKg: e.target.value })} sx={inputSx} />
+                      <SectionHeader label="COST & PRICING" />
+
+                      <Typography level="body-xs" fontWeight="lg" sx={{ color: "neutral.500", mb: 1 }}>Dimensions & Weights</Typography>
+                      <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 2, mb: 2 }}>
+                        <Field label="RM Diameter (mm)">
+                          <Input type="number" placeholder="e.g. 50" value={line.costEstimation.rmDiameterMm} onChange={(e) => setCost(line._key, { rmDiameterMm: e.target.value })} sx={inputSx} />
                         </Field>
-                        <Field label="Finish Weight (kg)">
-                          <Input type="number" placeholder="0.000" value={line.finishWeightKg} onChange={(e) => setLine(line._key, { finishWeightKg: e.target.value })} sx={inputSx} />
+                        <Field label="Forging Yield (%)">
+                          <Input type="number" placeholder="e.g. 85" value={line.costEstimation.forgingYieldPct} onChange={(e) => setCost(line._key, { forgingYieldPct: e.target.value })} sx={inputSx} />
                         </Field>
-                        <Field label="Billet Ø (mm)">
-                          <Input type="number" placeholder="0.00" value={line.billetDiameterMm} onChange={(e) => setLine(line._key, { billetDiameterMm: e.target.value })} sx={inputSx} />
+                        <Field label="Net Weight (kg)">
+                          <Input type="number" placeholder="0.000" value={line.costEstimation.forgingWeightKg} onChange={(e) => setCost(line._key, { forgingWeightKg: e.target.value })} sx={inputSx} />
                         </Field>
-                        <Field label="Billet Length (mm)">
-                          <Input type="number" placeholder="0.00" value={line.billetLengthMm} onChange={(e) => setLine(line._key, { billetLengthMm: e.target.value })} sx={inputSx} />
+                        <Field label="Cut Weight (kg)">
+                          <Input type="number" placeholder="0.000" value={line.costEstimation.cutPcWeightKg} onChange={(e) => setCost(line._key, { cutPcWeightKg: e.target.value })} sx={inputSx} />
                         </Field>
+                        <Field label="Gross Weight (kg)">
+                          <Input type="number" placeholder="0.000" value={line.costEstimation.grossWeightKg} onChange={(e) => setCost(line._key, { grossWeightKg: e.target.value })} sx={inputSx} />
+                        </Field>
+                      </Box>
+
+                      <Typography level="body-xs" fontWeight="lg" sx={{ color: "neutral.500", mb: 1 }}>Rate Factors</Typography>
+                      <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 2, mb: 2 }}>
+                        <Field label="RM Rate (₹/kg)">
+                          <Input type="number" placeholder="e.g. 87.50" value={line.costEstimation.rmRatePerKg} onChange={(e) => setCost(line._key, { rmRatePerKg: e.target.value })} sx={inputSx} />
+                        </Field>
+                        <Field label="Die Factor (₹/pc)">
+                          <Input type="number" placeholder="0.00" value={line.costEstimation.dieFactorPerPc} onChange={(e) => setCost(line._key, { dieFactorPerPc: e.target.value })} sx={inputSx} />
+                        </Field>
+                        <Field label="Cutting Cost per pc">
+                          <Input type="number" placeholder="0.00" value={line.costEstimation.cuttingCostFactorPerCm2} onChange={(e) => setCost(line._key, { cuttingCostFactorPerCm2: e.target.value })} sx={inputSx} />
+                        </Field>
+                        <Field label="Forging Conversion (₹/kg)">
+                          <Input type="number" placeholder="0.00" value={line.costEstimation.forgingConversionPerKg} onChange={(e) => setCost(line._key, { forgingConversionPerKg: e.target.value })} sx={inputSx} />
+                        </Field>
+                        <Field label="Heat Treatment (₹/kg)">
+                          <Input type="number" placeholder="0.00" value={line.costEstimation.htFactorPerKg} onChange={(e) => setCost(line._key, { htFactorPerKg: e.target.value })} sx={inputSx} />
+                        </Field>
+                        <Field label="Visual Inspection (₹/pc)">
+                          <Input type="number" placeholder="0.00" value={line.costEstimation.visualInspectionPerPc} onChange={(e) => setCost(line._key, { visualInspectionPerPc: e.target.value })} sx={inputSx} />
+                        </Field>
+                        <Field label="Rejection Factor (%)">
+                          <Input type="number" placeholder="e.g. 2" value={line.costEstimation.rejectionFactorPct} onChange={(e) => setCost(line._key, { rejectionFactorPct: e.target.value })} sx={inputSx} />
+                        </Field>
+                        <Field label="ICC Factor (%)">
+                          <Input type="number" placeholder="e.g. 1.5" value={line.costEstimation.iccFactorPct} onChange={(e) => setCost(line._key, { iccFactorPct: e.target.value })} sx={inputSx} />
+                        </Field>
+                        <Field label="Transportation Cost (₹/kg)">
+                          <Input type="number" placeholder="e.g. 1" value={line.costEstimation.transportationFactorPct} onChange={(e) => setCost(line._key, { transportationFactorPct: e.target.value })} sx={inputSx} />
+                        </Field>
+                        <Field label="Profit on VA Factor (%)">
+                          <Input type="number" placeholder="e.g. 15" value={line.costEstimation.profitOnVaFactorPct} onChange={(e) => setCost(line._key, { profitOnVaFactorPct: e.target.value })} sx={inputSx} />
+                        </Field>
+                        <Field label="Scrap Factor (₹/kg)">
+                          <Input type="number" placeholder="0.00" value={line.costEstimation.scrapFactorPerKg} onChange={(e) => setCost(line._key, { scrapFactorPerKg: e.target.value })} sx={inputSx} />
+                        </Field>
+                      </Box>
+
+                      <Typography level="body-xs" fontWeight="lg" sx={{ color: "neutral.500", mb: 1 }}>Computed Breakdown</Typography>
+                      <Box sx={{ border: "1px solid", borderColor: "neutral.200", borderRadius: "sm", overflow: "hidden" }}>
+                        <Box sx={{ display: "grid", gridTemplateColumns: "1fr auto", px: 2, py: 1, backgroundColor: "primary.100" }}>
+                          <Typography level="body-xs" fontWeight="lg">Cost Item</Typography>
+                          <Typography level="body-xs" fontWeight="lg">Amount (₹)</Typography>
+                        </Box>
+                        {([
+                          ["RM Cost", computed.rmCost, 0],
+                          ["Cutting Cost per pc", computed.cuttingCost, 1],
+                          ["Die Factor", computed.dieCost, 1],
+                          ["Finish Forging / Conversion Cost", computed.forgingConversionCost, 1],
+                          ["Heat Treatment", computed.htShotblastCost, 1],
+                          ["Visual Inspection", computed.visualInspectionCost, 1],
+                          ["Value Addition", computed.valueAddition, 0],
+                        ] as Array<[string, number | null, number]>).map(([label, val, indent]) => (
+                          <Box key={label} sx={{ display: "grid", gridTemplateColumns: "1fr auto", px: 2, py: 0.75, pl: indent ? 4 : 2, borderTop: "1px solid", borderColor: "neutral.100" }}>
+                            <Typography level="body-sm" sx={{ color: indent ? "neutral.500" : "text.primary" }}>
+                              {indent ? "└ " : ""}{label}
+                            </Typography>
+                            <Typography level="body-sm">{money(val)}</Typography>
+                          </Box>
+                        ))}
+                        <Box sx={{ display: "grid", gridTemplateColumns: "1fr auto", px: 2, py: 1, backgroundColor: "success.softBg", borderTop: "1px solid", borderColor: "neutral.200" }}>
+                          <Typography level="body-sm" fontWeight="lg">SUB TOTAL</Typography>
+                          <Typography level="body-sm" fontWeight="lg">{money(computed.subTotal)}</Typography>
+                        </Box>
+                        {([
+                          [`Rejection Cost (${line.costEstimation.rejectionFactorPct || 0}%)`, computed.rejectionCost],
+                          [`ICC (${line.costEstimation.iccFactorPct || 0}%)`, computed.iccCost],
+                          ["Transportation", computed.transportationCost],
+                          [`Profit on VA (${line.costEstimation.profitOnVaFactorPct || 0}%)`, computed.profitOnVa],
+                          ["Scrap", computed.scrapAmount !== null ? -computed.scrapAmount : null],
+                        ] as Array<[string, number | null]>).map(([label, val]) => (
+                          <Box key={label} sx={{ display: "grid", gridTemplateColumns: "1fr auto", px: 2, py: 0.75, borderTop: "1px solid", borderColor: "neutral.100" }}>
+                            <Typography level="body-sm" sx={{ color: "neutral.600" }}>+ {label}</Typography>
+                            <Typography level="body-sm">{money(val)}</Typography>
+                          </Box>
+                        ))}
+                        <Box sx={{ display: "grid", gridTemplateColumns: "1fr auto", px: 2, py: 1.25, backgroundColor: "primary.700", borderTop: "1px solid", borderColor: "neutral.200" }}>
+                          <Typography level="body-sm" fontWeight="lg" sx={{ color: "white" }}>Quoted Price / pc</Typography>
+                          <Typography level="body-sm" fontWeight="lg" sx={{ color: "white" }}>{money(computed.quotedPricePerPc)}</Typography>
+                        </Box>
                       </Box>
                     </SectionBox>
 
@@ -792,7 +818,7 @@ export default function FeasibilityStudyForm({ mode, studyId, initialData }: Pro
                         <ProcessChips options={processes} selected={line.processIds} onToggle={(id) => toggleProcess(line._key, id)} />
                       </Box>
 
-                      <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 2, mb: 2 }}>
+                      <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 2, mb: 2 }}>
                         <Field label="Recommended Machine" required>
                           <Select placeholder="Select..." value={line.recommendedMachineId || null} onChange={(_, v) => setLine(line._key, { recommendedMachineId: v ?? "" })} sx={inputSx}>
                             {machines.map((m) => (
@@ -806,33 +832,6 @@ export default function FeasibilityStudyForm({ mode, studyId, initialData }: Pro
                         <Field label="Flash Allowance (%)">
                           <Input type="number" placeholder="e.g. 12.00" value={line.flashAllowancePct} onChange={(e) => setLine(line._key, { flashAllowancePct: e.target.value })} sx={inputSx} />
                         </Field>
-                      </Box>
-
-                      <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 2, mb: 2 }}>
-                        <Field label="Material Util. (%)" auto>
-                          <Input readOnly value={computed.materialUtilPct !== null ? computed.materialUtilPct.toFixed(2) : "—"} sx={autoInputSx} />
-                        </Field>
-                        <Field label="Cycle Time (min/pc)">
-                          <Input type="number" placeholder="e.g. 3.50" value={line.cycleTimeMin} onChange={(e) => setLine(line._key, { cycleTimeMin: e.target.value })} sx={inputSx} />
-                        </Field>
-                        <Field label="Machine Load (hrs/mo)" auto>
-                          <Input readOnly value={computed.machineLoadHrsMonth !== null ? computed.machineLoadHrsMonth.toFixed(2) : "—"} sx={autoInputSx} />
-                        </Field>
-                        <Field label="Available Capacity (hrs)">
-                          <Input type="number" placeholder="From machine master" value={line.availableCapacityHrs} onChange={(e) => setLine(line._key, { availableCapacityHrs: e.target.value })} sx={inputSx} />
-                        </Field>
-                      </Box>
-
-                      <Box sx={{ mb: 2 }}>
-                        <Typography level="body-xs" sx={{ mb: 1, color: "neutral.600", fontWeight: 500 }}>Capacity Feasible?</Typography>
-                        <ToggleButtonGroup
-                          value={line.capacityFeasible || null}
-                          onChange={(_, v) => setLine(line._key, { capacityFeasible: (v ?? "") as LineForm["capacityFeasible"] })}
-                        >
-                          <Button value="Yes" startDecorator={<CheckCircleOutlineIcon />}>Yes</Button>
-                          <Button value="Over_Capacity" startDecorator={<CancelOutlinedIcon />}>Over Capacity</Button>
-                          <Button value="Not_Assessed" startDecorator={<WarningAmberIcon />}>Not Assessed</Button>
-                        </ToggleButtonGroup>
                       </Box>
 
                       <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2, mb: 2 }}>
@@ -895,7 +894,7 @@ export default function FeasibilityStudyForm({ mode, studyId, initialData }: Pro
                                   <DeleteOutlinedIcon style={{ fontSize: 16 }} />
                                 </Button>
                               </Box>
-                              <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 2, mb: 1.5 }}>
+                              <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 2, mb: 1.5 }}>
                                 <Field label="Die Drawing">
                                   <Select placeholder="Select..." value={ts.dieDrawingStatus || null} onChange={(_, v) => setToolingSet(line._key, ts._key, { dieDrawingStatus: (v ?? "") as ToolingSetForm["dieDrawingStatus"] })} sx={inputSx}>
                                     <Option value="Customer_Provides">Customer Provides</Option>
@@ -921,110 +920,6 @@ export default function FeasibilityStudyForm({ mode, studyId, initialData }: Pro
                         })}
                       </Box>
                     </SectionBox>
-
-                    {/* Cost & Pricing */}
-                    <SectionBox muted sx={{ p: 2 }}>
-                      <SectionHeader label="COST & PRICING" />
-
-                      <Typography level="body-xs" fontWeight="lg" sx={{ color: "neutral.500", mb: 1 }}>Dimensions & Weights</Typography>
-                      <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr", gap: 2, mb: 2 }}>
-                        <Field label="RM Diameter (mm)">
-                          <Input type="number" placeholder="e.g. 50" value={line.costEstimation.rmDiameterMm} onChange={(e) => setCost(line._key, { rmDiameterMm: e.target.value })} sx={inputSx} />
-                        </Field>
-                        <Field label="Forging Yield (%)">
-                          <Input type="number" placeholder="e.g. 85" value={line.costEstimation.forgingYieldPct} onChange={(e) => setCost(line._key, { forgingYieldPct: e.target.value })} sx={inputSx} />
-                        </Field>
-                        <Field label="Forging Weight (kg)" auto>
-                          <Input readOnly value={line.forgingWeightKg || "—"} sx={autoInputSx} />
-                        </Field>
-                        <Field label="Cut PC Weight (kg)">
-                          <Input type="number" placeholder="0.000" value={line.costEstimation.cutPcWeightKg} onChange={(e) => setCost(line._key, { cutPcWeightKg: e.target.value })} sx={inputSx} />
-                        </Field>
-                        <Field label="Gross Weight (kg)">
-                          <Input type="number" placeholder="0.000" value={line.costEstimation.grossWeightKg} onChange={(e) => setCost(line._key, { grossWeightKg: e.target.value })} sx={inputSx} />
-                        </Field>
-                      </Box>
-
-                      <Typography level="body-xs" fontWeight="lg" sx={{ color: "neutral.500", mb: 1 }}>Rate Factors</Typography>
-                      <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 2, mb: 2 }}>
-                        <Field label="RM Rate (₹/kg)">
-                          <Input type="number" placeholder="e.g. 87.50" value={line.costEstimation.rmRatePerKg} onChange={(e) => setCost(line._key, { rmRatePerKg: e.target.value })} sx={inputSx} />
-                        </Field>
-                        <Field label="Die Factor (₹/pc)">
-                          <Input type="number" placeholder="0.00" value={line.costEstimation.dieFactorPerPc} onChange={(e) => setCost(line._key, { dieFactorPerPc: e.target.value })} sx={inputSx} />
-                        </Field>
-                        <Field label="Cutting Cost Factor (₹/cm²)">
-                          <Input type="number" placeholder="0.00" value={line.costEstimation.cuttingCostFactorPerCm2} onChange={(e) => setCost(line._key, { cuttingCostFactorPerCm2: e.target.value })} sx={inputSx} />
-                        </Field>
-                        <Field label="Forging Conversion (₹/kg)">
-                          <Input type="number" placeholder="0.00" value={line.costEstimation.forgingConversionPerKg} onChange={(e) => setCost(line._key, { forgingConversionPerKg: e.target.value })} sx={inputSx} />
-                        </Field>
-                        <Field label="H&T Factor (₹/kg)">
-                          <Input type="number" placeholder="0.00" value={line.costEstimation.htFactorPerKg} onChange={(e) => setCost(line._key, { htFactorPerKg: e.target.value })} sx={inputSx} />
-                        </Field>
-                        <Field label="Visual Inspection (₹/pc)">
-                          <Input type="number" placeholder="0.00" value={line.costEstimation.visualInspectionPerPc} onChange={(e) => setCost(line._key, { visualInspectionPerPc: e.target.value })} sx={inputSx} />
-                        </Field>
-                        <Field label="Rejection Factor (%)">
-                          <Input type="number" placeholder="e.g. 2" value={line.costEstimation.rejectionFactorPct} onChange={(e) => setCost(line._key, { rejectionFactorPct: e.target.value })} sx={inputSx} />
-                        </Field>
-                        <Field label="ICC Factor (%)">
-                          <Input type="number" placeholder="e.g. 1.5" value={line.costEstimation.iccFactorPct} onChange={(e) => setCost(line._key, { iccFactorPct: e.target.value })} sx={inputSx} />
-                        </Field>
-                        <Field label="Transportation Factor (%)">
-                          <Input type="number" placeholder="e.g. 1" value={line.costEstimation.transportationFactorPct} onChange={(e) => setCost(line._key, { transportationFactorPct: e.target.value })} sx={inputSx} />
-                        </Field>
-                        <Field label="Profit on VA Factor (%)">
-                          <Input type="number" placeholder="e.g. 15" value={line.costEstimation.profitOnVaFactorPct} onChange={(e) => setCost(line._key, { profitOnVaFactorPct: e.target.value })} sx={inputSx} />
-                        </Field>
-                        <Field label="Scrap Factor (₹/kg)">
-                          <Input type="number" placeholder="0.00" value={line.costEstimation.scrapFactorPerKg} onChange={(e) => setCost(line._key, { scrapFactorPerKg: e.target.value })} sx={inputSx} />
-                        </Field>
-                      </Box>
-
-                      <Typography level="body-xs" fontWeight="lg" sx={{ color: "neutral.500", mb: 1 }}>Computed Breakdown</Typography>
-                      <Box sx={{ border: "1px solid", borderColor: "neutral.200", borderRadius: "sm", overflow: "hidden" }}>
-                        <Box sx={{ display: "grid", gridTemplateColumns: "1fr auto", px: 2, py: 1, backgroundColor: "primary.100" }}>
-                          <Typography level="body-xs" fontWeight="lg">Cost Item</Typography>
-                          <Typography level="body-xs" fontWeight="lg">Amount (₹)</Typography>
-                        </Box>
-                        {([
-                          ["RM Cost", computed.rmCost, 0],
-                          ["Cutting Cost / SQ CM", computed.cuttingCost, 1],
-                          ["Finish Forging / Conversion Cost", computed.forgingConversionCost, 1],
-                          ["H&T + Shot Blasting (Incl. Transport)", computed.htShotblastCost, 1],
-                          ["Visual Inspection", computed.visualInspectionCost, 1],
-                          ["Value Addition", computed.valueAddition, 0],
-                        ] as Array<[string, number | null, number]>).map(([label, val, indent]) => (
-                          <Box key={label} sx={{ display: "grid", gridTemplateColumns: "1fr auto", px: 2, py: 0.75, pl: indent ? 4 : 2, borderTop: "1px solid", borderColor: "neutral.100" }}>
-                            <Typography level="body-sm" sx={{ color: indent ? "neutral.500" : "text.primary" }}>
-                              {indent ? "└ " : ""}{label}
-                            </Typography>
-                            <Typography level="body-sm">{money(val)}</Typography>
-                          </Box>
-                        ))}
-                        <Box sx={{ display: "grid", gridTemplateColumns: "1fr auto", px: 2, py: 1, backgroundColor: "success.softBg", borderTop: "1px solid", borderColor: "neutral.200" }}>
-                          <Typography level="body-sm" fontWeight="lg">SUB TOTAL</Typography>
-                          <Typography level="body-sm" fontWeight="lg">{money(computed.subTotal)}</Typography>
-                        </Box>
-                        {([
-                          [`Rejection Cost (${line.costEstimation.rejectionFactorPct || 0}%)`, computed.rejectionCost],
-                          [`ICC (${line.costEstimation.iccFactorPct || 0}%)`, computed.iccCost],
-                          [`Transportation (${line.costEstimation.transportationFactorPct || 0}%)`, computed.transportationCost],
-                          [`Profit on VA (${line.costEstimation.profitOnVaFactorPct || 0}%)`, computed.profitOnVa],
-                          ["Scrap", computed.scrapAmount !== null ? -computed.scrapAmount : null],
-                        ] as Array<[string, number | null]>).map(([label, val]) => (
-                          <Box key={label} sx={{ display: "grid", gridTemplateColumns: "1fr auto", px: 2, py: 0.75, borderTop: "1px solid", borderColor: "neutral.100" }}>
-                            <Typography level="body-sm" sx={{ color: "neutral.600" }}>+ {label}</Typography>
-                            <Typography level="body-sm">{money(val)}</Typography>
-                          </Box>
-                        ))}
-                        <Box sx={{ display: "grid", gridTemplateColumns: "1fr auto", px: 2, py: 1.25, backgroundColor: "primary.700", borderTop: "1px solid", borderColor: "neutral.200" }}>
-                          <Typography level="body-sm" fontWeight="lg" sx={{ color: "white" }}>Quoted Price / pc</Typography>
-                          <Typography level="body-sm" fontWeight="lg" sx={{ color: "white" }}>{money(computed.quotedPricePerPc)}</Typography>
-                        </Box>
-                      </Box>
-                    </SectionBox>
                   </Box>
                 )}
               </SectionBox>
@@ -1032,6 +927,30 @@ export default function FeasibilityStudyForm({ mode, studyId, initialData }: Pro
           })}
         </Box>
       )}
+
+      {/* ── Actions ── */}
+      <Box sx={{ display: "flex", gap: 1, alignItems: "center", justifyContent: "flex-end", mt: 3, flexWrap: "wrap" }}>
+        <Button variant="outlined" color="neutral" onClick={() => router.push("/feasibility-study")} disabled={submitting}>
+          Cancel
+        </Button>
+        <Button
+          variant="solid" color="success"
+          startDecorator={submitting ? <CircularProgress size="sm" /> : <SendOutlinedIcon />}
+          onClick={() => submit("Submitted_for_Review")}
+          disabled={submitting}
+        >
+          Submit for Review
+        </Button>
+        <Button
+          variant="solid"
+          sx={{ backgroundColor: "#b39ddb", "&:hover": { backgroundColor: "#a48cd0" } }}
+          startDecorator={generating ? <CircularProgress size="sm" /> : <DescriptionOutlinedIcon />}
+          onClick={handleGenerateQuotation}
+          disabled={mode === "new" || generating}
+        >
+          Generate Quotation
+        </Button>
+      </Box>
     </Box>
   );
 }

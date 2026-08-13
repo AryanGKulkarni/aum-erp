@@ -131,33 +131,18 @@ model FeasibilityStudy {
 }
 
 // 4b. Feasibility Lines Model
-enum CapacityFeasibility {
-  Yes
-  Over_Capacity @map("Over Capacity")
-  Not_Assessed  @map("Not Assessed")
-}
-
 model FeasibilityLine {
   feasibilityLineId Int @id @default(autoincrement()) @map("feasibility_line_id")
   studyId           Int @map("study_id")
   enquiryLineId     Int @map("enquiry_line_id")
 
-  forgingWeightKg  Decimal? @map("forging_weight_kg") @db.Decimal(8, 3)
-  finishWeightKg   Decimal? @map("finish_weight_kg") @db.Decimal(8, 3)
-  billetDiameterMm Decimal? @map("billet_diameter_mm") @db.Decimal(6, 2)
-  billetLengthMm   Decimal? @map("billet_length_mm") @db.Decimal(6, 2)
-
-  recommendedMachineId   Int                  @map("recommended_machine_id")
-  billetWeightEstKg      Decimal?             @map("billet_weight_est_kg") @db.Decimal(8, 3)
-  flashAllowancePct      Decimal?             @map("flash_allowance_pct") @db.Decimal(5, 2)
-  materialUtilisationPct Decimal?             @map("material_utilisation_pct") @db.Decimal(5, 2)
-  cycleTimeMin           Decimal?             @map("cycle_time_min") @db.Decimal(6, 2)
-  machineLoadHrsMonth    Decimal?             @map("machine_load_hrs_month") @db.Decimal(8, 2)
-  availableCapacityHrs   Decimal?             @map("available_capacity_hrs") @db.Decimal(8, 2)
-  capacityFeasible       CapacityFeasibility? @default(Not_Assessed) @map("capacity_feasible")
-  flagsRisks             String?              @map("flags_risks") @db.Text
-  overallVerdict         OverallVerdict?      @map("overall_verdict")
-  verdictRemarks         String?              @map("verdict_remarks") @db.Text
+  // Weights and billet dimensions live on CostEstimation — they are not duplicated here.
+  recommendedMachineId Int             @map("recommended_machine_id")
+  billetWeightEstKg    Decimal?        @map("billet_weight_est_kg") @db.Decimal(8, 3)
+  flashAllowancePct    Decimal?        @map("flash_allowance_pct") @db.Decimal(5, 2)
+  flagsRisks           String?         @map("flags_risks") @db.Text
+  overallVerdict       OverallVerdict? @map("overall_verdict")
+  verdictRemarks       String?         @map("verdict_remarks") @db.Text
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamp
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamp

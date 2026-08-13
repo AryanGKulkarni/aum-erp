@@ -97,7 +97,9 @@ function Field({ label, required, auto, children, span }: {
   label: string; required?: boolean; auto?: boolean; children: React.ReactNode; span?: number;
 }) {
   return (
-    <Box sx={span ? { gridColumn: `span ${span}` } : {}}>
+    // minWidth: 0 lets the field shrink inside its grid track instead of
+    // forcing the track wider and overflowing the section.
+    <Box sx={{ minWidth: 0, ...(span ? { gridColumn: `span ${span}` } : {}) }}>
       <Typography level="body-xs" sx={{ mb: 0.5, color: "neutral.600", fontWeight: 500 }}>
         {label}
         {required && <Typography component="span" sx={{ color: "danger.500" }}> *</Typography>}
@@ -431,34 +433,15 @@ export default function EnquiryForm({ mode, enquiryId, initialData }: Props) {
           <Typography level="h3">{mode === "new" ? "New Enquiry" : enquiryNumber}</Typography>
           <Typography level="body-sm" sx={{ color: "neutral.500" }}>{titleLine}</Typography>
         </Box>
-        <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
-          <Button variant="outlined" color="neutral" onClick={() => router.push("/enquiries")} disabled={submitting}>
-            Cancel
-          </Button>
-          <Button
-            variant="outlined"
-            color="primary"
-            startDecorator={submitting ? <CircularProgress size="sm" /> : undefined}
-            onClick={() => submit("Draft")}
-            disabled={submitting}
-          >
-            Save Draft
-          </Button>
-          <Button
-            color="success"
-            startDecorator={submitting ? <CircularProgress size="sm" /> : undefined}
-            onClick={() => submit("Open")}
-            disabled={submitting}
-          >
-            Submit
-          </Button>
-        </Box>
+        <Button variant="outlined" color="neutral" onClick={() => router.push("/enquiries")} disabled={submitting}>
+          Cancel
+        </Button>
       </Box>
 
       {/* ── Enquiry Header ── */}
       <SectionBox sx={{ mb: 3, p: 3 }}>
         <SectionHeader label="ENQUIRY HEADER" />
-        <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 2, mb: 2 }}>
+        <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 2, mb: 2 }}>
           <Field label="Enquiry Number">
             <Input
               value={enquiryNumber || (mode === "new" ? "Auto-generated" : "")}
@@ -492,7 +475,7 @@ export default function EnquiryForm({ mode, enquiryId, initialData }: Props) {
             <Input type="date" value={enquiryDate} onChange={(e) => setEnquiryDate(e.target.value)} sx={inputSx} />
           </Field>
         </Box>
-        <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 2 }}>
+        <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 2 }}>
           <Field label="Received By">
             <Select
               placeholder="— Select user —"
@@ -522,11 +505,11 @@ export default function EnquiryForm({ mode, enquiryId, initialData }: Props) {
         </Box>
       </SectionBox>
 
-      {/* ── Enquiry Lines ── */}
+      {/* ── Enquiry Details ── */}
       <Box sx={{ mb: 2 }}>
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", mb: 1 }}>
           <Box>
-            <Typography level="title-lg">Enquiry Lines</Typography>
+            <Typography level="title-lg">Enquiry Details</Typography>
             <Typography level="body-xs" sx={{ color: "neutral.500" }}>
               Add one or more parts. Each line captures part details and quantities. Tooling details are filled in during Feasibility Study.
             </Typography>
@@ -567,7 +550,7 @@ export default function EnquiryForm({ mode, enquiryId, initialData }: Props) {
                 {/* Part Details */}
                 <SectionBox muted sx={{ p: 2 }}>
                   <SectionHeader label="PART DETAILS" />
-                  <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 2, mb: 2 }}>
+                  <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 2, mb: 2 }}>
                     <Field label="Part Name" required>
                       <Input placeholder="e.g. Connecting Rod" value={line.partName} onChange={(e) => setLine(line._key, { partName: e.target.value })} sx={inputSx} disabled={!!line.lineId} />
                     </Field>
@@ -595,7 +578,7 @@ export default function EnquiryForm({ mode, enquiryId, initialData }: Props) {
                 {/* Production Requirements */}
                 <SectionBox muted sx={{ p: 2 }}>
                   <SectionHeader label="PRODUCTION REQUIREMENTS" />
-                  <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 2, mb: 2 }}>
+                  <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 2, mb: 2 }}>
                     <Field label="Qty per Month">
                       <Input type="number" placeholder="e.g. 500" value={line.qtyPerMonth} onChange={(e) => setLine(line._key, { qtyPerMonth: e.target.value })} sx={inputSx} />
                     </Field>
@@ -653,11 +636,25 @@ export default function EnquiryForm({ mode, enquiryId, initialData }: Props) {
         ))}
       </Box>
 
-      {/* ── Summary Bar ── */}
-      <Box sx={{ position: "sticky", bottom: 0, mx: -3, px: 3, py: 1.5, backgroundColor: "background.surface", borderTop: "1px solid", borderColor: "neutral.200", display: "flex", gap: 3, alignItems: "center" }}>
+      {/* ── Summary + Actions Bar ── */}
+      <Box sx={{ position: "sticky", bottom: 0, mx: -3, px: 3, py: 1.5, backgroundColor: "background.surface", borderTop: "1px solid", borderColor: "neutral.200", display: "flex", gap: 3, alignItems: "center", flexWrap: "wrap" }}>
         <Typography level="body-sm"><strong>Parts:</strong> {lines.length}</Typography>
         <Typography level="body-sm"><strong>Qty/Month:</strong> {totalQtyMonth || 0}</Typography>
         <Typography level="body-sm"><strong>Qty/Year:</strong> {totalQtyYear || 0}</Typography>
+        <Box sx={{ flex: 1 }} />
+        <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
+          <Button variant="outlined" color="neutral" onClick={() => router.push("/enquiries")} disabled={submitting}>
+            Cancel
+          </Button>
+          <Button
+            color="success"
+            startDecorator={submitting ? <CircularProgress size="sm" /> : undefined}
+            onClick={() => submit("Open")}
+            disabled={submitting}
+          >
+            Submit
+          </Button>
+        </Box>
       </Box>
 
       <AddCustomerModal

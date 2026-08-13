@@ -191,8 +191,8 @@ function PartCard({ line, index }: { line: QuotationLineDetail; index: number })
           <Box sx={{ px: 2.5, pt: 0.75 }}>
             <SpecRow label="RM Diameter" value={`${num(line.rmDiameterMm, 0)} mm`} />
             <SpecRow label="Forging Yield" value={`${num(line.forgingYieldPct, 0)}%`} />
-            <SpecRow label="Forging Weight" value={`${num(line.forgingWeightKg, 3)} kg`} />
-            <SpecRow label="Cut PC Weight" value={`${num(line.cutPcWeightKg, 3)} kg`} />
+            <SpecRow label="Net Weight" value={`${num(line.forgingWeightKg, 3)} kg`} />
+            <SpecRow label="Cut Weight" value={`${num(line.cutPcWeightKg, 3)} kg`} />
             <SpecRow label="Gross Weight" value={`${num(line.grossWeightKg, 3)} kg`} />
           </Box>
 
@@ -201,12 +201,12 @@ function PartCard({ line, index }: { line: QuotationLineDetail; index: number })
             <Box sx={{ px: 2.5, pt: 0.75 }}>
               <SpecRow label="RM Base Rate" value={`${inr(line.rmRatePerKg)}/kg`} />
               <SpecRow label="Die Factor" value={`${inr(line.dieFactorPerPc)}/pc`} />
-              <SpecRow label="Cutting" value={`${inr(line.cuttingCostFactorPerCm2)}/cm²`} />
+              <SpecRow label="Cutting Cost per pc" value={`${inr(line.cuttingCostFactorPerCm2)}/pc`} />
               <SpecRow label="Finish Forging" value={`${inr(line.forgingConversionPerKg)}/kg`} />
-              <SpecRow label="H&T" value={`${inr(line.htFactorPerKg)}/kg`} />
+              <SpecRow label="Heat Treatment" value={`${inr(line.htFactorPerKg)}/kg`} />
               <SpecRow label="Rejection" value={`${num(line.rejectionFactorPct, 0)}%`} />
               <SpecRow label="ICC" value={`${num(line.iccFactorPct, 0)}%`} />
-              <SpecRow label="Transportation" value={`${num(line.transportationFactorPct, 0)}%`} />
+              <SpecRow label="Transportation Cost" value={`${inr(line.transportationFactorPct)}/kg`} />
               <SpecRow label="Profit on VA" value={`${num(line.profitOnVaFactorPct, 0)}%`} />
               <SpecRow label="Scrap" value={`${inr(line.scrapFactorPerKg)}/kg`} />
             </Box>
@@ -232,9 +232,9 @@ function PartCard({ line, index }: { line: QuotationLineDetail; index: number })
             </Typography>
           </Box>
           <Box sx={{ px: 2.5, pt: 0.75 }}>
-            <BreakdownRow label="Cutting Cost / SQ CM" value={inr(line.cuttingCost)} muted />
+            <BreakdownRow label="Cutting Cost per pc" value={inr(line.cuttingCost)} muted />
             <BreakdownRow label="Finish Forging Conv." value={inr(line.forgingConversionCost)} muted />
-            <BreakdownRow label="H&T + Shot Blasting" value={inr(line.htShotblastCost)} muted />
+            <BreakdownRow label="Heat Treatment" value={inr(line.htShotblastCost)} muted />
             <BreakdownRow label="Visual Inspection" value={inr(line.visualInspectionCost)} muted />
             <BreakdownRow label="Die Factor" value={inr(line.dieFactorPerPc)} muted />
             <Box sx={{ display: "flex", justifyContent: "space-between", pt: 0.75, mt: 0.5, pb: 0.75, borderTop: "1px solid", borderColor: "neutral.300" }}>
@@ -261,7 +261,7 @@ function PartCard({ line, index }: { line: QuotationLineDetail; index: number })
           <Box sx={{ px: 2.5, pt: 0.75, pb: 1 }}>
             <BreakdownRow label={`Rejection (${num(line.rejectionFactorPct, 0)}%)`} value={inr(line.rejectionCost)} />
             <BreakdownRow label={`ICC (${num(line.iccFactorPct, 0)}%)`} value={inr(line.iccCost)} />
-            <BreakdownRow label={`Transportation (${num(line.transportationFactorPct, 0)}%)`} value={inr(line.transportationCost)} />
+            <BreakdownRow label="Transportation" value={inr(line.transportationCost)} />
             <BreakdownRow label={`Profit on VA (${num(line.profitOnVaFactorPct, 0)}%)`} value={inr(line.profitOnVa)} />
             <BreakdownRow label="Scrap" value={`-${inr(line.scrapAmount)}`} />
           </Box>
