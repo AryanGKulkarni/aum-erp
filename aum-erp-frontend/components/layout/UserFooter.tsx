@@ -18,7 +18,11 @@ function initials(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-export default function UserFooter() {
+interface UserFooterProps {
+  collapsed?: boolean;
+}
+
+export default function UserFooter({ collapsed }: UserFooterProps) {
   const router = useRouter();
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [loading, setLoading] = useState(true);
@@ -42,12 +46,42 @@ export default function UserFooter() {
   const displayName = loading ? "…" : (user?.fullName ?? "Guest");
   const displayRole = loading ? "" : (user?.role ?? "Not signed in");
 
+  const avatar = (
+    <Avatar size="sm" color="primary" variant="solid">
+      {!loading && user ? initials(user.fullName) : "?"}
+    </Avatar>
+  );
+
+  if (collapsed) {
+    return (
+      <FooterSection collapsed>
+        <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
+          <Tooltip title={loading ? "" : `${displayName}${displayRole ? ` · ${displayRole}` : ""}`} placement="right" size="sm">
+            {avatar}
+          </Tooltip>
+          {user && (
+            <Tooltip title="Log out" placement="right" size="sm">
+              <IconButton
+                size="sm"
+                variant="plain"
+                color="neutral"
+                loading={loggingOut}
+                onClick={handleLogout}
+                sx={{ color: "neutral.400", "&:hover": { color: "neutral.100", backgroundColor: "neutral.800" } }}
+              >
+                <LogoutIcon style={{ fontSize: 18 }} />
+              </IconButton>
+            </Tooltip>
+          )}
+        </Box>
+      </FooterSection>
+    );
+  }
+
   return (
     <FooterSection>
       <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-        <Avatar size="sm" color="primary" variant="solid">
-          {!loading && user ? initials(user.fullName) : "?"}
-        </Avatar>
+        {avatar}
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography
             level="title-sm"

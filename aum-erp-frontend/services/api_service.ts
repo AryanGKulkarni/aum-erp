@@ -340,6 +340,115 @@ export async function createUser(dto: { fullName: string; email: string; role: s
   return { id: String(u.userId), name: u.fullName, email: u.email, role: u.role };
 }
 
+// ── Masters ───────────────────────────────────────────────────────────────────
+// Full records for the Masters screen. Prisma serialises Decimal columns as
+// strings, so numeric fields arrive as strings and are coerced at the edges.
+
+export interface MasterUser {
+  userId: number;
+  fullName: string;
+  email: string | null;
+  role: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface MasterCustomer {
+  customerId: number;
+  companyName: string;
+  contactPerson: string | null;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  city: string | null;
+  gstNumber: string | null;
+}
+
+export interface MasterMachine {
+  machineId: number;
+  machineName: string;
+  machineType: string;
+  capacityTons: string | null;
+  availableHrsPerDay: string | null;
+  workingDaysPerMonth: number | null;
+  /** Generated STORED column — read-only. */
+  availableHrsPerMonth: string | null;
+  status: string;
+}
+
+async function fail(res: Response, fallback: string): Promise<never> {
+  const body = await res.json().catch(() => null);
+  const message = body?.message;
+  throw new Error(Array.isArray(message) ? message.join(", ") : (message ?? fallback));
+}
+
+export async function getMasterUsers(): Promise<MasterUser[]> {
+  const res = await apiFetch(`${API_URL}/user/all`);
+  if (!res.ok) return fail(res, "Failed to fetch users");
+  return res.json();
+}
+
+export async function updateUser(
+  id: number,
+  dto: { fullName?: string; email?: string; role?: string; isActive?: boolean },
+): Promise<MasterUser> {
+  const res = await apiFetch(`${API_URL}/user/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(dto),
+  });
+  if (!res.ok) return fail(res, "Failed to update user");
+  return res.json();
+}
+
+export async function getMasterCustomers(): Promise<MasterCustomer[]> {
+  const res = await apiFetch(`${API_URL}/customer`);
+  if (!res.ok) return fail(res, "Failed to fetch customers");
+  return res.json();
+}
+
+export async function updateCustomer(
+  id: number,
+  dto: Record<string, unknown>,
+): Promise<MasterCustomer> {
+  const res = await apiFetch(`${API_URL}/customer/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(dto),
+  });
+  if (!res.ok) return fail(res, "Failed to update customer");
+  return res.json();
+}
+
+export async function getMasterMachines(): Promise<MasterMachine[]> {
+  const res = await apiFetch(`${API_URL}/machine`);
+  if (!res.ok) return fail(res, "Failed to fetch machines");
+  return res.json();
+}
+
+export async function createMachine(dto: Record<string, unknown>): Promise<MasterMachine> {
+  const res = await apiFetch(`${API_URL}/machine`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(dto),
+  });
+  if (!res.ok) return fail(res, "Failed to create machine");
+  return res.json();
+}
+
+export async function updateMachine(
+  id: number,
+  dto: Record<string, unknown>,
+): Promise<MasterMachine> {
+  const res = await apiFetch(`${API_URL}/machine/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(dto),
+  });
+  if (!res.ok) return fail(res, "Failed to update machine");
+  return res.json();
+}
+
 interface RawCreatedEnquiryLine {
   lineId: number;
 }

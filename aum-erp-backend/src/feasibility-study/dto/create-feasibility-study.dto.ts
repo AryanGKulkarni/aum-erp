@@ -50,22 +50,10 @@ export class CreateCostEstimationDto {
 export class CreateFeasibilityLineDto {
   @ApiProperty() enquiryLineId!: number;
 
-  @ApiPropertyOptional() forgingWeightKg?: number;
-  @ApiPropertyOptional() finishWeightKg?: number;
-  @ApiPropertyOptional() billetDiameterMm?: number;
-  @ApiPropertyOptional() billetLengthMm?: number;
-
+  // Weights and billet dimensions belong to costEstimation, not to the line.
   @ApiProperty() recommendedMachineId!: number;
   @ApiPropertyOptional() billetWeightEstKg?: number;
   @ApiPropertyOptional() flashAllowancePct?: number;
-  @ApiPropertyOptional() materialUtilisationPct?: number;
-  @ApiPropertyOptional() cycleTimeMin?: number;
-  @ApiPropertyOptional() machineLoadHrsMonth?: number;
-  @ApiPropertyOptional() availableCapacityHrs?: number;
-
-  @ApiPropertyOptional({ enum: ['Yes', 'Over_Capacity', 'Not_Assessed'] })
-  capacityFeasible?: 'Yes' | 'Over_Capacity' | 'Not_Assessed';
-
   @ApiPropertyOptional() flagsRisks?: string;
 
   @ApiPropertyOptional({ enum: ['Feasible', 'Not_Feasible', 'Conditional'] })
